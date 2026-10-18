@@ -1,0 +1,33 @@
+{
+  "name": "repertoire",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "cf dev",
+    "build": "npm run typecheck && cf build",
+    "preview": "npm run build && vite preview",
+    "deploy": "npm run typecheck && cf deploy",
+    "deploy:dry-run": "npm run typecheck && cf deploy --dry-run",
+    "logs": "cf o11y telemetry live-tail",
+    "typecheck": "cf workers types && tsc -b",
+    "test": "node --test 'src/**/*.test.ts'"
+  },
+  "dependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "2.0.0-beta.v.1",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "cf": "1.0.0-beta.18",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  },
+  "allowScripts": {
+    "workerd@1.20261012.1": true,
+    "esbuild@0.28.2": true
+  }
+}
