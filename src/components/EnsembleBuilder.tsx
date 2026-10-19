@@ -1,18 +1,8 @@
-import {
-  countFor,
-  describe,
-  ensembleKey,
-  FAMILIES,
-  INSTRUMENTS,
-  PALETTE,
-  PRESETS,
-  scoreOrder,
-  type Ensemble,
-  type EnsembleEntry,
-} from "../lib/instrumentation";
+import { describe, ensembleKey, FAMILIES, INSTRUMENTS, PALETTE, PRESETS, scoreOrder, type Ensemble } from "../lib/instrumentation";
 
 interface Props {
-  index: Map<string, EnsembleEntry>;
+  /** Works for exactly this line-up */
+  count: (e: Ensemble) => number;
   ensemble: Ensemble;
   onChange: (e: Ensemble) => void;
   includeArr: boolean;
@@ -27,8 +17,7 @@ function withCount(e: Ensemble, id: string, delta: number): Ensemble {
   return next;
 }
 
-export function EnsembleBuilder({ index, ensemble, onChange, includeArr, onIncludeArrChange }: Props) {
-  const count = (e: Ensemble) => countFor(index.get(ensembleKey(e)), includeArr);
+export function EnsembleBuilder({ count, ensemble, onChange, includeArr, onIncludeArrChange }: Props) {
   const parts = scoreOrder(ensemble);
   const total = count(ensemble);
   const currentKey = ensembleKey(ensemble);

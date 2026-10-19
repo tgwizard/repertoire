@@ -6,11 +6,16 @@
     "dev": "cf dev",
     "build": "npm run typecheck && cf build",
     "preview": "npm run build && vite preview",
-    "deploy": "npm run typecheck && cf deploy",
-    "deploy:dry-run": "npm run typecheck && cf deploy --dry-run",
+    "deploy": "test -f public/data/ensembles.json || (echo 'No dataset in public/data: run npm run data:pull' && exit 1) && npm run typecheck && cf deploy",
+    "deploy:dry-run": "test -f public/data/ensembles.json || (echo 'No dataset in public/data: run npm run data:pull' && exit 1) && npm run typecheck && cf deploy --dry-run",
     "logs": "cf o11y telemetry live-tail",
-    "typecheck": "cf workers types && tsc -b",
-    "test": "node --test 'src/**/*.test.ts'"
+    "typecheck": "tsc -b",
+    "test": "node --test 'src/**/*.test.ts' 'crawler/**/*.test.ts'",
+    "crawl": "node crawler/main.ts",
+    "index": "node crawler/main.ts build",
+    "data:publish": "node crawler/publish.ts",
+    "data:pull": "node crawler/pull.ts",
+    "data:refresh": "npm run crawl && npm run data:publish"
   },
   "dependencies": {
     "react": "^19.3.1",

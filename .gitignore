@@ -5,3 +5,5 @@ dist/
 *.tsbuildinfo
 .DS_Store
 .cloudflare/
+.cache/
+public/data/

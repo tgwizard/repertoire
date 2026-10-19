@@ -3,18 +3,6 @@
 
 export type Ensemble = Record<string, number>;
 
-export interface Category {
-  name: string;
-  count: number;
-}
-
-export interface EnsembleEntry {
-  key: string;
-  parts: Ensemble;
-  original: Category[];
-  arr: Category[];
-}
-
 // Words that end in "s" but are not plurals.
 const NOT_PLURAL = new Set(["bass", "brass", "timpani", "hands", "childrens", "strings", "percussion"]);
 
@@ -60,7 +48,7 @@ export function parseCategory(name: string): ParsedCategory | null {
   const m = /^For (.+?)( \(arr\))?$/.exec(name);
   if (!m) return null;
   const body = m[1]!;
-  if (/^\d+ players/.test(body)) return null; // aggregate categories
+  if (/^\d+ players?\b/.test(body)) return null; // aggregate categories ("For 1 player", "For 4 players")
   if (!/^[A-Za-z0-9 ,'()-]+$/.test(body)) return null; // spam / malformed names
 
   const parts: Ensemble = {};
@@ -82,26 +70,14 @@ export function ensembleKey(e: Ensemble): string {
     .join(",");
 }
 
-export function buildIndex(categories: Category[]): Map<string, EnsembleEntry> {
-  const index = new Map<string, EnsembleEntry>();
-  for (const cat of categories) {
-    const parsed = parseCategory(cat.name);
-    if (!parsed) continue;
-    const key = ensembleKey(parsed.parts);
-    let entry = index.get(key);
-    if (!entry) {
-      entry = { key, parts: parsed.parts, original: [], arr: [] };
-      index.set(key, entry);
-    }
-    (parsed.arr ? entry.arr : entry.original).push(cat);
+/** Inverse of ensembleKey: "cello,viola,violin*2" → { cello: 1, viola: 1, violin: 2 } */
+export function parseEnsembleKey(key: string): Ensemble {
+  const e: Ensemble = {};
+  for (const part of key.split(",")) {
+    const m = /^(.+?)(?:\*(\d+))?$/.exec(part);
+    if (m?.[1]) e[m[1]] = Number(m[2] ?? 1);
   }
-  return index;
-}
-
-export function countFor(entry: EnsembleEntry | undefined, includeArr: boolean): number {
-  if (!entry) return 0;
-  const sum = (cs: Category[]) => cs.reduce((s, c) => s + c.count, 0);
-  return sum(entry.original) + (includeArr ? sum(entry.arr) : 0);
+  return e;
 }
 
 // ---- Palette ---------------------------------------------------------------

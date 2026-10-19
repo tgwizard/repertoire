@@ -1,19 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { EnsembleBuilder } from "./components/EnsembleBuilder";
+import { Footer } from "./components/Footer";
 import { Results } from "./components/Results";
-import { getInstrumentations } from "./lib/api";
-import {
-  buildIndex,
-  countFor,
-  decodeEnsemble,
-  describe,
-  encodeEnsemble,
-  ensembleKey,
-  type Ensemble,
-  type EnsembleEntry,
-} from "./lib/instrumentation";
+import { loadEnsembles, loadMeta } from "./lib/data";
+import { decodeEnsemble, describe, encodeEnsemble, ensembleKey, type Ensemble } from "./lib/instrumentation";
 import { useDebounced } from "./lib/useDebounced";
-import type { Source } from "./lib/useWorks";
+import type { EnsemblesFile, MetaFile } from "./shared/data";
 
 function readUrl() {
   const p = new URLSearchParams(location.search);
@@ -21,15 +13,19 @@ function readUrl() {
 }
 
 export function App() {
-  const [index, setIndex] = useState<Map<string, EnsembleEntry> | null>(null);
+  const [index, setIndex] = useState<EnsemblesFile["ensembles"] | null>(null);
+  const [meta, setMeta] = useState<MetaFile | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ensemble, setEnsemble] = useState<Ensemble>(() => readUrl().ensemble);
   const [includeArr, setIncludeArr] = useState(() => readUrl().includeArr);
 
   useEffect(() => {
-    getInstrumentations()
-      .then((r) => setIndex(buildIndex(r.categories.map(([name, count]) => ({ name, count })))))
+    loadEnsembles()
+      .then((r) => setIndex(r.ensembles))
       .catch((e: Error) => setLoadError(e.message));
+    loadMeta()
+      .then(setMeta)
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -42,20 +38,15 @@ export function App() {
     document.title = enc ? `${describe(ensemble)} · Repertoire Finder` : "Repertoire Finder";
   }, [ensemble, includeArr]);
 
-  // Wait for the ensemble to settle before loading works, so clicking through
-  // instruments doesn't fire a request per click.
-  const settled = useDebounced(ensemble, 450);
-  const entry = index?.get(ensembleKey(settled));
-  const sources = useMemo<Source[]>(
-    () =>
-      entry
-        ? [
-            ...entry.original.map((c) => ({ ...c, arr: false })),
-            ...(includeArr ? entry.arr.map((c) => ({ ...c, arr: true })) : []),
-          ]
-        : [],
-    [entry, includeArr],
-  );
+  const count = (e: Ensemble) => {
+    const entry = index?.[ensembleKey(e)];
+    return entry ? entry[0] + (includeArr ? entry[1] : 0) : 0;
+  };
+
+  // Wait for the ensemble to settle before loading works.
+  const settled = useDebounced(ensemble, 300);
+  const settledKey = ensembleKey(settled);
+  const entry = index?.[settledKey];
 
   return (
     <div className="page">
@@ -63,34 +54,33 @@ export function App() {
         <h1>
           Repertoire <em>Finder</em>
         </h1>
-        <p className="tagline">Music for the group you actually have, drawn from the public-domain scores on IMSLP.</p>
+        <p className="tagline">The repertoire for the group you actually have, with sheet music from IMSLP where it exists.</p>
       </header>
 
       {loadError ? (
-        <div className="notice error">Couldn't load instrumentations: {loadError}</div>
+        <div className="notice error">
+          Couldn't load the repertoire index: {loadError}. Build it with <code>npm run crawl</code>.
+        </div>
       ) : !index ? (
         <div className="notice">
-          <span className="spinner" /> Loading the instrumentation catalogue… (the first load after a deploy takes a few seconds)
+          <span className="spinner" /> Loading the repertoire index…
         </div>
       ) : (
         <>
           <EnsembleBuilder
-            index={index}
+            count={count}
             ensemble={ensemble}
             onChange={setEnsemble}
             includeArr={includeArr}
             onIncludeArrChange={setIncludeArr}
           />
-          {sources.length > 0 && (
-            <Results key={ensembleKey(settled)} sources={sources} total={countFor(entry, includeArr)} />
+          {entry && count(settled) > 0 && (
+            <Results key={settledKey} ensembleKey={settledKey} shards={entry[2]} total={count(settled)} includeArr={includeArr} />
           )}
         </>
       )}
 
-      <footer className="footer">
-        Scores and metadata from <a href="https://imslp.org">IMSLP / Petrucci Music Library</a>; composer dates from{" "}
-        <a href="https://www.wikidata.org">Wikidata</a>. An independent project, not affiliated with IMSLP.
-      </footer>
+      <Footer meta={meta} />
     </div>
   );
 }

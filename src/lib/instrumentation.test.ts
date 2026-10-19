@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildIndex, countFor, decodeEnsemble, describe, encodeEnsemble, ensembleKey, parseCategory } from "./instrumentation.ts";
+import { decodeEnsemble, describe, encodeEnsemble, ensembleKey, parseCategory, parseEnsembleKey } from "./instrumentation.ts";
 
 test("parses counts and plurals", () => {
   assert.deepEqual(parseCategory("For 2 violins, viola, cello"), {
@@ -39,21 +39,17 @@ test("splits 'and'", () => {
 
 test("rejects aggregates and spam", () => {
   assert.equal(parseCategory("For 5 players"), null);
+  assert.equal(parseCategory("For 1 player"), null);
+  assert.equal(parseCategory("For 2 players with continuo (arr)"), null);
   assert.equal(parseCategory("For 2 violins') and 1=2 and ('1'='1"), null);
   assert.equal(parseCategory("For orchestra&transclude=Template:Catintro"), null);
   assert.equal(parseCategory("Scores featuring the horn"), null);
 });
 
-test("index groups originals and arrangements by ensemble", () => {
-  const index = buildIndex([
-    { name: "For flute, oboe, clarinet, bassoon, horn", count: 275 },
-    { name: "For flute, oboe, clarinet, bassoon, horn (arr)", count: 100 },
-    { name: "For 5 players", count: 3000 },
-  ]);
-  const entry = index.get(ensembleKey({ horn: 1, bassoon: 1, clarinet: 1, oboe: 1, flute: 1 }));
-  assert.equal(countFor(entry, false), 275);
-  assert.equal(countFor(entry, true), 375);
-  assert.equal(index.size, 1);
+test("ensemble keys round trip", () => {
+  const e = { violin: 2, viola: 1, cello: 1 };
+  assert.equal(ensembleKey(e), "cello,viola,violin*2");
+  assert.deepEqual(parseEnsembleKey(ensembleKey(e)), { cello: 1, viola: 1, violin: 2 });
 });
 
 test("url round trip", () => {
