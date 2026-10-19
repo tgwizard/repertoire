@@ -15,7 +15,8 @@
     "index": "node crawler/main.ts build",
     "data:publish": "node crawler/publish.ts",
     "data:pull": "node crawler/pull.ts",
-    "data:refresh": "npm run crawl && npm run data:publish"
+    "data:refresh": "npm run crawl && npm run data:publish",
+    "smoke": "node --test smoke/smoke.test.ts"
   },
   "dependencies": {
     "react": "^19.3.1",

@@ -68,6 +68,25 @@ npm test
 npm run typecheck
 ```
 
+## Smoke tests
+
+`npm run smoke` checks a running site over plain HTTP:
+- **Serving:** the app and deep links.
+- **Dataset:** its freshness and size.
+- **Line-ups:** plausible counts for common ones.
+- **Canon:** well-known works present and ranked near the top (Nielsen's wind quintet, Debussy's quartet, Barber's *Summer Music*, which comes from outside IMSLP).
+- **Regressions:** known misclassifications stay fixed.
+- **Shards:** composers resolve, ranking order holds.
+- **Sources:** every source contributes.
+- **Downloads:** the export files exist.
+
+```sh
+npm run smoke                                   # production
+SMOKE_URL=http://localhost:5173 npm run smoke   # local dev server
+```
+
+Known data gaps are reported as `todo` tests, which print what they found but don't fail the run.
+
 ## Deploying
 
 ```sh
