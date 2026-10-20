@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Composer, EnsembleShard, EnsemblesFile, MetaFile, ShardFile, SourceId, Work } from "../shared/data";
 
 async function getJson<T>(path: string): Promise<T> {
@@ -41,11 +41,14 @@ export function useEnsembleWorks(key: string, shardNos: number[]) {
   const [state, setState] = useState<State>(EMPTY);
   const [loadAll, setLoadAll] = useState(false);
   const shardKey = shardNos.join(",");
+  // Works already shown, so loading the rest doesn't briefly shrink the list.
+  const shown = useRef(0);
 
   useEffect(() => setLoadAll(false), [key]);
 
   useEffect(() => {
     let cancelled = false;
+    if (!loadAll) shown.current = 0;
     setState((s) => (s.works.length && loadAll ? { ...s, loading: true } : EMPTY));
     (async () => {
       const works: Work[] = [];
@@ -53,6 +56,7 @@ export function useEnsembleWorks(key: string, shardNos: number[]) {
       let sources: State["sources"] = {};
       for (const [i, n] of shardNos.entries()) {
         if (!loadAll && works.length >= AUTO_LOAD) {
+          shown.current = works.length;
           if (!cancelled) setState({ works, composers, sources, loading: false, remaining: shardNos.slice(i), error: null });
           return;
         }
@@ -62,7 +66,10 @@ export function useEnsembleWorks(key: string, shardNos: number[]) {
         works.push(...part.works);
         Object.assign(composers, shard.composers);
         sources = part.sources ?? sources;
-        if (!cancelled) setState({ works: [...works], composers: { ...composers }, sources, loading: true, remaining: [], error: null });
+        if (!cancelled && works.length > shown.current) {
+          shown.current = works.length;
+          setState({ works: [...works], composers: { ...composers }, sources, loading: true, remaining: [], error: null });
+        }
       }
       if (!cancelled) setState({ works, composers, sources, loading: false, remaining: [], error: null });
     })().catch((e: Error) => {
@@ -73,7 +80,8 @@ export function useEnsembleWorks(key: string, shardNos: number[]) {
     };
   }, [key, shardKey, loadAll]); // shardKey stands in for shardNos
 
-  return { ...state, loadAll: () => setLoadAll(true) };
+  const requestAll = useCallback(() => setLoadAll(true), []);
+  return { ...state, loadAll: requestAll };
 }
 
 // ---- Links -----------------------------------------------------------------

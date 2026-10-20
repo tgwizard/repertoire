@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   imslpCategoryUrl,
   imslpUrl,
@@ -162,6 +162,22 @@ export function Results({ ensembleKey, shards, total, includeArr }: Props) {
   const [shown, setShown] = useState(PAGE);
 
   const works = useMemo(() => (includeArr ? all : all.filter((w) => !w.arr)), [all, includeArr]);
+  // Unloaded shards may hold only arrangements, so compare against what's shown.
+  const partial = works.length < total;
+  const fullyLoaded = !loading && !partial;
+  const filtering = query.trim() !== "" || eraFilter.size > 0 || composer !== "" || show !== "all" || sort !== "rank";
+
+  // The top works load first. Filtering, searching or re-sorting needs them all.
+  useEffect(() => {
+    if (filtering && partial && remaining.length) loadAll();
+  }, [filtering, partial, remaining.length, loadAll]);
+
+  // A new line-up: bring the top of the results into view if we've scrolled past it.
+  const sectionRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = sectionRef.current;
+    if (el && el.getBoundingClientRect().top < 0) el.scrollIntoView({ behavior: "smooth" });
+  }, []);
 
   const eraCounts = useMemo(() => {
     const c = new Map<string, number>();
@@ -213,22 +229,35 @@ export function Results({ ensembleKey, shards, total, includeArr }: Props) {
   const eraOptions = [...ERAS, UNKNOWN].filter((e) => eraCounts.has(e));
   const reset = () => setShown(PAGE);
 
+  const hasMore = filtered.length > shown || (partial && remaining.length > 0);
+  const loadMore = () => {
+    // Past the loaded works, fetch the rest of the line-up.
+    if (shown + PAGE * 2 > filtered.length && partial) loadAll();
+    setShown((s) => s + PAGE * 2);
+  };
+
   return (
-    <section className="results" aria-label="Works">
+    <section className="results" aria-label="Works" ref={sectionRef}>
       <div className="results-head">
         <h2>
-          {fmt.format(filtered.length)} <span className="muted">{filtered.length === 1 ? "work" : "works"} for {describe(parseEnsembleKey(ensembleKey))}</span>
+          {filtering ? (
+            <>
+              {fmt.format(filtered.length)} <span className="muted">of {fmt.format(total)} works match</span>
+            </>
+          ) : (
+            <>
+              {fmt.format(total)} <span className="muted">{total === 1 ? "work" : "works"} for {describe(parseEnsembleKey(ensembleKey))}</span>
+            </>
+          )}
         </h2>
-        {loading && <span className="muted small">Loading…</span>}
-        {remaining.length > 0 && (
-          <span className="small">
-            Showing the top {fmt.format(works.length)} of {fmt.format(total)}.{" "}
-            <button className="link-button" onClick={loadAll}>
-              Load all
-            </button>
-          </span>
-        )}
-        {error && <span className="small error-text">{error}</span>}
+        <p className="results-sub">
+          {filtering ? `For ${describe(parseEnsembleKey(ensembleKey))}. ` : "Most established first. "}
+          {!fullyLoaded &&
+            (!loading && !filtering
+              ? `Showing the top ${fmt.format(works.length)}; filtering, sorting or “Load more” at the end loads all ${fmt.format(total)}.`
+              : `Loading… ${fmt.format(works.length)} of ${fmt.format(total)}`)}
+          {error && <span className="error-text"> {error}</span>}
+        </p>
       </div>
       <LineupSources sources={sources} />
 
@@ -242,20 +271,20 @@ export function Results({ ensembleKey, shards, total, includeArr }: Props) {
             ] as [Show, string, number][]
           ).map(([value, label, n]) => (
             <button key={value} className={`era-chip${show === value ? " active" : ""}`} aria-pressed={show === value} onClick={() => (setShow(value), reset())}>
-              {label} <span className="era-count">{fmt.format(n)}</span>
+              {label} {fullyLoaded && <span className="era-count">{fmt.format(n)}</span>}
             </button>
           ))}
           <span className="chip-sep" />
           {eraOptions.map((e) => (
             <button key={e} className={`era-chip${eraFilter.has(e) ? " active" : ""}`} aria-pressed={eraFilter.has(e)} onClick={() => (toggleEra(e), reset())}>
-              {e} <span className="era-count">{fmt.format(eraCounts.get(e) ?? 0)}</span>
+              {e} {fullyLoaded && <span className="era-count">{fmt.format(eraCounts.get(e) ?? 0)}</span>}
             </button>
           ))}
         </div>
         <div className="filter-row">
           <input type="search" placeholder="Search titles and composers…" value={query} onChange={(e) => (setQuery(e.target.value), reset())} />
           <select value={composer} onChange={(e) => (setComposer(e.target.value), reset())} aria-label="Composer">
-            <option value="">All composers ({fmt.format(composerOptions.length)})</option>
+            <option value="">All composers{fullyLoaded ? ` (${fmt.format(composerOptions.length)})` : ""}</option>
             {composerOptions.map(([c, n]) => (
               <option key={c} value={c}>
                 {composers[c]?.name ?? c} ({n})
@@ -306,9 +335,9 @@ export function Results({ ensembleKey, shards, total, includeArr }: Props) {
           );
         })}
       </ol>
-      {filtered.length > shown && (
-        <button className="more" onClick={() => setShown((s) => s + PAGE * 2)}>
-          Show more ({fmt.format(filtered.length - shown)} remaining)
+      {hasMore && (
+        <button className="more" onClick={loadMore}>
+          Load more
         </button>
       )}
       {!loading && filtered.length === 0 && works.length > 0 && <p className="muted">No works match these filters.</p>}

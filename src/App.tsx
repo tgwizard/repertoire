@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Intro, NoMatches } from "./components/EmptyState";
 import { EnsembleBuilder } from "./components/EnsembleBuilder";
 import { Footer } from "./components/Footer";
 import { Results } from "./components/Results";
@@ -46,7 +47,24 @@ export function App() {
   // Wait for the ensemble to settle before loading works.
   const settled = useDebounced(ensemble, 300);
   const settledKey = ensembleKey(settled);
-  const entry = index?.[settledKey];
+  const settledEntry = index?.[settledKey];
+
+  const main = () => {
+    if (Object.keys(ensemble).length === 0) return <Intro meta={meta} />;
+    if (count(ensemble) === 0) {
+      return (
+        <NoMatches
+          ensemble={ensemble}
+          count={count}
+          arrangements={index?.[ensembleKey(ensemble)]?.[1] ?? 0}
+          onChange={setEnsemble}
+          onIncludeArr={() => setIncludeArr(true)}
+        />
+      );
+    }
+    if (!settledEntry || count(settled) === 0) return null;
+    return <Results key={settledKey} ensembleKey={settledKey} shards={settledEntry[2]} total={count(settled)} includeArr={includeArr} />;
+  };
 
   return (
     <div className="page">
@@ -54,30 +72,34 @@ export function App() {
         <h1>
           Repertoire <em>Finder</em>
         </h1>
-        <p className="tagline">The repertoire for the group you actually have, with sheet music from IMSLP where it exists.</p>
+        <p className="tagline">
+          The repertoire for the group you actually have, with sheet music from IMSLP where it exists.{" "}
+          <a href="https://github.com/tgwizard/repertoire/issues">Bugs</a> and{" "}
+          <a href="mailto:tgwizard@gmail.com?subject=%5Brepertoire%5D%20bug">feedback</a> welcome.
+        </p>
       </header>
 
       {loadError ? (
         <div className="notice error">
-          Couldn't load the repertoire index: {loadError}. Build it with <code>npm run crawl</code>.
+          Couldn't load the repertoire index: {loadError}. Get it with <code>npm run data:pull</code>.
         </div>
       ) : !index ? (
         <div className="notice">
           <span className="spinner" /> Loading the repertoire index…
         </div>
       ) : (
-        <>
-          <EnsembleBuilder
-            count={count}
-            ensemble={ensemble}
-            onChange={setEnsemble}
-            includeArr={includeArr}
-            onIncludeArrChange={setIncludeArr}
-          />
-          {entry && count(settled) > 0 && (
-            <Results key={settledKey} ensembleKey={settledKey} shards={entry[2]} total={count(settled)} includeArr={includeArr} />
-          )}
-        </>
+        <div className="layout">
+          <aside className="sidebar">
+            <EnsembleBuilder
+              count={count}
+              ensemble={ensemble}
+              onChange={setEnsemble}
+              includeArr={includeArr}
+              onIncludeArrChange={setIncludeArr}
+            />
+          </aside>
+          <main className="main">{main()}</main>
+        </div>
       )}
 
       <Footer meta={meta} />

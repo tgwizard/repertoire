@@ -70,6 +70,13 @@ export function ensembleKey(e: Ensemble): string {
     .join(",");
 }
 
+/** The ensemble with delta more (or fewer) of one instrument. */
+export function adjust(e: Ensemble, id: string, delta: number): Ensemble {
+  const next = { ...e, [id]: (e[id] ?? 0) + delta };
+  if (next[id]! <= 0) delete next[id];
+  return next;
+}
+
 /** Inverse of ensembleKey: "cello,viola,violin*2" → { cello: 1, viola: 1, violin: 2 } */
 export function parseEnsembleKey(key: string): Ensemble {
   const e: Ensemble = {};
