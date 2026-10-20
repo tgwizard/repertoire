@@ -449,7 +449,6 @@ button:disabled {
 
 .empty-state p {
   margin: 0 0 10px;
-  max-width: 60ch;
 }
 
 .suggestion-list {
