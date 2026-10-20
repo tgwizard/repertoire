@@ -2,6 +2,7 @@
 
 import { WIKIDATA_ENSEMBLES } from "../ensembles.ts";
 import { cached, DAY, fetchJson, readStage, writeStage } from "../http.ts";
+import { resolveTitles, type ImslpStage } from "./imslp.ts";
 import type { WikipediaStage } from "./wikipedia.ts";
 
 const ENDPOINT = "https://query.wikidata.org/sparql";
@@ -153,6 +154,18 @@ export async function crawlWikidata(): Promise<void> {
         OPTIONAL { ?wp schema:about ?p ; schema:isPartOf <https://en.wikipedia.org/> } }`),
     );
     for (const r of res.value) addComposer(r);
+  }
+
+  // Wikidata often links an old IMSLP page title: follow IMSLP's redirects.
+  const imslp = await readStage<ImslpStage>("imslp");
+  if (imslp) {
+    const current = new Set(Object.values(imslp.works).map((w) => w.title));
+    const stale = [...new Set(Object.values(works).map((w) => w.imslp))].filter((t): t is string => !!t && !current.has(t));
+    console.log(`Wikidata: resolving ${stale.length} IMSLP links to pages not crawled under that title`);
+    const resolved = await resolveTitles(stale);
+    for (const w of Object.values(works)) if (w.imslp && resolved[w.imslp]) w.imslp = resolved[w.imslp];
+    const fixed = Object.values(works).filter((w) => w.imslp && current.has(w.imslp)).length;
+    console.log(`  ${Object.keys(resolved).length} renamed pages resolved; ${fixed} works now link to a crawled IMSLP page`);
   }
 
   const stage: WikidataStage = { fetchedAt: oldest, composers: composerMap, works };

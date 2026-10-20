@@ -41,7 +41,7 @@ function tables(d: ExportData, links: boolean): Table[] {
         ...((links
           ? [["imslp_url", "TEXT"], ["wikidata_url", "TEXT"], ["wikipedia_url", "TEXT"]]
           : [["imslp_page", "TEXT"], ["wikidata_id", "TEXT"], ["wikipedia_title", "TEXT"]]) as Table["columns"]),
-        ["openopus_id", "INTEGER"],
+        ["openopus_id", "TEXT"],
         links ? ["musicbrainz_url", "TEXT"] : ["musicbrainz_id", "TEXT"],
         ["musicbrainz_recordings", "INTEGER"],
       ],

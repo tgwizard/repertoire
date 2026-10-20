@@ -1,10 +1,11 @@
 // Open Opus: curated works by major composers, with "popular"/"recommended" flags (CC0).
 
-import { cached, DAY, writeStage } from "../http.ts";
-import { fetchJson } from "../http.ts";
+import { createHash } from "node:crypto";
+import { cached, DAY, fetchJson, writeStage } from "../http.ts";
 
 export interface OoWork {
-  id: number;
+  /** The dump has no ids: a stable hash of composer and title */
+  id: string;
   title: string;
   genre: string;
   popular: boolean;
@@ -27,6 +28,7 @@ export interface OpenOpusStage {
 }
 
 const yearOf = (d: string | null | undefined) => (d ? Number(d.slice(0, 4)) || null : null);
+const workId = (composer: string, title: string) => createHash("sha1").update(`${composer}|${title}`).digest("hex").slice(0, 12);
 
 export async function crawlOpenOpus(): Promise<void> {
   console.log("Open Opus: work dump");
@@ -39,7 +41,7 @@ export async function crawlOpenOpus(): Promise<void> {
     died: yearOf(c.death),
     popular: c.popular === "1",
     works: (c.works ?? []).map((w: any) => ({
-      id: Number(w.id),
+      id: workId(c.complete_name, w.subtitle ? `${w.title} ${w.subtitle}` : w.title),
       title: w.subtitle ? `${w.title} ${w.subtitle}` : w.title,
       genre: w.genre,
       popular: w.popular === "1",

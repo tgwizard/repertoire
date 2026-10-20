@@ -48,7 +48,7 @@ interface BuildWork {
   imslp?: string;
   wikidata?: string;
   wikipedia?: string;
-  openopus?: number;
+  openopus?: string;
   musicbrainz?: string;
   recordings?: number;
   sitelinks: number;
@@ -107,6 +107,8 @@ export async function build(): Promise<void> {
   };
 
   const addWork = (w: BuildWork) => {
+    // Ids must be unique: a collision would silently replace a work.
+    if (works.has(w.id)) throw new Error(`Duplicate work id ${w.id}`);
     works.set(w.id, w);
     if (w.composer) {
       const list = byComposer.get(w.composer) ?? [];
@@ -255,12 +257,18 @@ export async function build(): Promise<void> {
   }
 
   // ---- 5. Open Opus ---------------------------------------------------------
+  // Open Opus names composers like Wikidata's English labels ("Sergei Prokofiev"), so
+  // labels bridge to IMSLP names ("Prokofiev, Sergey"); unambiguous labels only.
   const composerIndex = new ComposerIndex([...composers.keys()].filter((k) => !k.startsWith("wd:")));
-  const wdComposerByName = new Map<string, string>();
-  for (const [key, c] of composers) if (key.startsWith("wd:")) wdComposerByName.set(normalize(c.name), key);
+  const byLabel = new Map<string, string | null>();
+  for (const c of Object.values(wd?.composers ?? {})) {
+    if (!c.label) continue;
+    const label = normalize(c.label);
+    const key = c.imslp ?? `wd:${c.qid}`;
+    byLabel.set(label, byLabel.has(label) && byLabel.get(label) !== key ? null : key);
+  }
   for (const oc of oo?.composers ?? []) {
-    const key =
-      composerIndex.find(oc.name, oc.completeName) ?? wdComposerByName.get(normalize(oc.completeName)) ?? `oo:${normalize(oc.completeName)}`;
+    const key = byLabel.get(normalize(oc.completeName)) ?? composerIndex.find(oc.name, oc.completeName) ?? `oo:${normalize(oc.completeName)}`;
     const c = composer(key, () => ({ name: oc.completeName }));
     c.born ??= oc.born ?? undefined;
     c.died ??= oc.died ?? undefined;
@@ -273,8 +281,11 @@ export async function build(): Promise<void> {
       } else {
         const parts = openOpusEnsemble(ow.title, ow.genre, oc.born);
         if (!parts || !titleFitsPlayers(ow.title, parts)) continue;
-        w = { id: `oo:${ow.id}`, title: ow.title, composer: key, sitelinks: 0, signals: new Set(), ensembles: new Map() };
-        addWork(w);
+        w = works.get(`oo:${ow.id}`) ?? null; // the same title listed twice
+        if (!w) {
+          w = { id: `oo:${ow.id}`, title: ow.title, composer: key, sitelinks: 0, signals: new Set(), ensembles: new Map() };
+          addWork(w);
+        }
         addMembership(w, parts, false, "openopus", `${ow.genre}: “${ow.title}”`);
         stats.added.openopus++;
       }
@@ -326,7 +337,9 @@ export async function build(): Promise<void> {
       via: [...m.via],
     };
     if (w.composer) out.composer = w.composer;
-    if (w.year !== undefined) out.year = w.year;
+    // Wikidata publication dates are often a modern edition's: keep years within the composer's life (roughly).
+    const plausible = !c?.born || (w.year! >= c.born + 5 && (!c.died || w.year! <= c.died + 30));
+    if (w.year !== undefined && plausible) out.year = w.year;
     const era = w.era ?? c?.era;
     if (era) out.era = era;
     if (m.arr) out.arr = true;

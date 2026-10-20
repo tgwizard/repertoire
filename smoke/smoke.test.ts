@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bareTitle } from "../crawler/match.ts";
+import { bareTitle, musicalKey } from "../crawler/match.ts";
 import { decodeEnsemble, ensembleKey } from "../src/lib/instrumentation.ts";
 import {
   DATASETS_URL,
@@ -168,13 +168,14 @@ test("downloads for the deployed dataset exist", async () => {
   if (latest.version !== meta.version) console.log(`# note: deployed ${meta.version}, latest published is ${latest.version}`);
 });
 
-// Known gap: non-IMSLP works that duplicate an IMSLP work, because matching missed
-// (e.g. Ravel's quartet, "M.35"). Reported, not failed, until the matcher handles them.
-test("no duplicates from unmatched sources", { todo: "matcher misses some catalogues (e.g. Ravel M.)" }, async (t) => {
+// Known gap: non-IMSLP works that look like an IMSLP work but weren't matched, usually
+// because it was ambiguous. Reported, not failed.
+test("no duplicates from unmatched sources", { todo: "ambiguous matches are left unmatched" }, async (t) => {
   const { works, composers } = await lineup(STRING_QUARTET);
   const imslp = works.filter((w) => w.imslp);
+  const sameKey = (a: string, b: string) => !musicalKey(a) || !musicalKey(b) || musicalKey(a) === musicalKey(b);
   const dupes = works.filter(
-    (w) => !w.imslp && imslp.some((i) => i.composer === w.composer && bareTitle(i.title).startsWith(bareTitle(w.title))),
+    (w) => !w.imslp && imslp.some((i) => i.composer === w.composer && bareTitle(i.title) === bareTitle(w.title) && sameKey(i.title, w.title)),
   );
   for (const d of dupes) t.diagnostic(`${composers[d.composer ?? ""]?.name}: "${d.title}" (${d.id})`);
   assert.equal(dupes.length, 0);

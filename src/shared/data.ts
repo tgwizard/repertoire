@@ -83,7 +83,8 @@ export interface Work {
   imslp?: string;
   wikidata?: string;
   wikipedia?: string;
-  openopus?: number;
+  /** Open Opus work (a hash of composer and title: the dump has no ids) */
+  openopus?: string;
   musicbrainz?: string;
   /** Recording count on MusicBrainz */
   recordings?: number;

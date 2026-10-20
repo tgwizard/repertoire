@@ -168,3 +168,32 @@ export async function crawlComposerEras(names: string[]): Promise<void> {
   }
   await writeStage("imslp-composer-eras", stage);
 }
+
+/**
+ * Current titles for pages that may have been renamed (Wikidata often links an old
+ * title). Follows normalization and redirects; titles that don't exist are left out.
+ */
+export async function resolveTitles(titles: string[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (let i = 0; i < titles.length; i += 50) {
+    const batch = titles.slice(i, i + 50);
+    try {
+      const res = await cached(`imslp:resolve:v1:${batch.join("|")}`, 30 * DAY, () =>
+        mw({ action: "query", titles: batch.join("|"), redirects: "1" }),
+      );
+      const data = res.value;
+      const step = new Map<string, string>();
+      for (const n of data.query?.normalized ?? []) step.set(n.from, n.to);
+      for (const r of data.query?.redirects ?? []) step.set(r.from, r.to);
+      const existing = new Set(Object.values<any>(data.query?.pages ?? {}).filter((p) => !("missing" in p)).map((p) => p.title as string));
+      for (const t of batch) {
+        let cur = t;
+        for (let hops = 0; hops < 3 && step.has(cur); hops++) cur = step.get(cur)!;
+        if (existing.has(cur)) out[t] = cur;
+      }
+    } catch (e) {
+      console.warn(`  ✗ resolving IMSLP titles: ${(e as Error).message}`);
+    }
+  }
+  return out;
+}

@@ -6,6 +6,13 @@ export function normalize(s: string): string {
     .replace(/\p{M}/gu, "")
     .toLowerCase()
     .replace(/ß/g, "ss")
+    // Letters that NFD doesn't decompose
+    .replace(/ł/g, "l")
+    .replace(/ø/g, "o")
+    .replace(/æ/g, "ae")
+    .replace(/œ/g, "oe")
+    .replace(/đ/g, "d")
+    .replace(/ı/g, "i")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 }
@@ -24,8 +31,21 @@ const CATALOGUES: [string, RegExp][] = [
   ["bb", /\bBB\.?\s*(\d+[a-z]?)/g],
   ["fs", /\bFS\.?\s*(\d+[a-z]?)/g],
   ["jw", /\bJW\.?\s*([IVX]+\s*\/\s*\d+)/g],
-  ["s", /\bS\.?\s*(\d{2,3}[a-z]?)\b/g], // Liszt (S. 244)
+  ["s", /\bS\.?\s*(\d{1,3}[a-z]?)\b/g], // Liszt (S. 244), Ives (S. 1)
   ["h", /\bH\.?\s*(\d{2,3}[a-z]?)\b/g], // Martinů
+  ["m", /\bM\.?\s*(\d{1,3}[a-z]?)\b/g], // Ravel (M. 35)
+  ["cd", /\bCD\.?\s*(\d{1,3}[a-z]?)\b/g], // Debussy (CD 5)
+  ["l", /\bL\.?\s*(\d{1,3}[a-z]?)\b/g], // Debussy, older Lesure numbers
+  ["fp", /\bFP\.?\s*(\d{1,3}[a-z]?)\b/g], // Poulenc
+  ["b", /\bB\.?\s*(\d{1,3}[a-z]?)\b/g], // Dvořák (Burghauser), Bloch
+  ["g", /\bG\.?\s*(\d{2,3}[a-z]?)\b/g], // Boccherini (Gérard)
+  ["bv", /\bBV\.?\s*(\d{1,3}[a-z]?)\b/g], // Busoni
+  ["wab", /\bWAB\.?\s*(\d{1,3}[a-z]?)\b/gi], // Bruckner
+  ["trv", /\bTrV\.?\s*(\d{1,3}[a-z]?)\b/gi], // Richard Strauss
+  ["swv", /\bSWV\.?\s*(\d{1,3}[a-z]?)\b/gi], // Schütz
+  ["mwv", /\bMWV\.?\s*([A-Z]\s*\d{1,3})\b/gi], // Mendelssohn
+  ["z", /\bZ\.?\s*(\d{1,3}[a-z]?)\b/g], // Purcell
+  ["wq", /\bWq\.?\s*(\d{1,3}[a-z]?)\b/gi], // C. P. E. Bach
 ];
 
 const OPUS = /\bOp(?:us)?\.?\s*(?:posth\.?\s*)?(\d+[a-z]?)(?:\s*,?\s*(?:No|Nr|N°|n°)\.?\s*(\d+[a-z]?))?/gi;
@@ -42,7 +62,18 @@ export function catalogueKeys(title: string): Set<string> {
     if (m[2]) keys.add(`op:${op}/${m[2].toLowerCase()}`);
   }
   for (const [prefix, re] of CATALOGUES) {
-    for (const m of title.matchAll(re)) keys.add(`${prefix}:${m[1]!.toLowerCase().replace(/\s+/g, "")}`);
+    for (const m of title.matchAll(re)) {
+      const value = m[1]!.toLowerCase().replace(/\s+/g, "");
+      keys.add(`${prefix}:${value}`);
+      // Ranges on collection pages: "G.214-215", "Hob.III:19-24".
+      const range = /^\s*[-–]\s*(\d+)\b/.exec(title.slice(m.index! + m[0].length));
+      const start = /(\d+)$/.exec(value);
+      if (range && start) {
+        const [from, to] = [Number(start[1]), Number(range[1])];
+        const base = value.slice(0, value.length - start[1]!.length);
+        if (to > from && to - from <= 12) for (let n = from + 1; n <= to; n++) keys.add(`${prefix}:${base}${n}`);
+      }
+    }
   }
   return keys;
 }
@@ -51,46 +82,69 @@ const subKeys = (keys: Set<string>) => [...keys].filter((k) => k.includes("/"));
 
 /** Title without catalogue numbers, keys, punctuation: for exact-title fallback matching. */
 export function bareTitle(title: string): string {
-  return normalize(
-    title
-      .replace(/\([^)]*\)/g, " ")
-      .replace(OPUS, " ")
-      .replace(/\b(?:in\s+)?[A-G](?:[- ](?:flat|sharp))?\s+(?:major|minor)\b/gi, " "),
-  )
+  let t = title.replace(/\([^)]*\)/g, " ").replace(OPUS, " ");
+  for (const [, re] of CATALOGUES) t = t.replace(re, " ");
+  return normalize(t.replace(/\b(?:in\s+)?[A-G](?:[- ](?:flat|sharp))?\s+(?:major|minor)\b/gi, " "))
     .replace(/\b(no|nr)\s*(\d+)/g, "$2")
     .trim();
+}
+
+const KEY = /\b([A-G])(?:[- ](flat|sharp))?\s+(major|minor)\b/i;
+
+/** "Prelude in C-sharp minor" → "c sharp minor"; null if no key is named. */
+export function musicalKey(title: string): string | null {
+  const m = KEY.exec(title);
+  return m ? [m[1], m[2], m[3]].filter(Boolean).join(" ").toLowerCase() : null;
 }
 
 export interface Candidate {
   title: string;
 }
 
+const systems = (keys: Set<string>) => new Set([...keys].map((k) => k.slice(0, k.indexOf(":"))));
+
 /**
  * The best candidate (same composer) for a title, or null if none or ambiguous.
- * Exact sub-number matches (op:18/1) beat parent matches ("String Quartets, Op.18"),
- * which beat bare-title equality.
+ *
+ * - Exact sub-number matches (op:18/1) beat parent matches ("String Quartets, Op.18").
+ * - Catalogue numbers aren't unique (reused opus numbers, arrangement pages), so among
+ *   candidates sharing one, an equal bare title breaks the tie.
+ * - Without a shared number, equal bare titles match if only one side has catalogue
+ *   numbers ("String Quartet No. 1" ≈ "String Quartet No.1, Op.50"), or if the two use
+ *   different catalogue systems (Bartók BB vs Sz) and the title includes a number.
+ * - Titles naming different keys are different works, unless they share a number that
+ *   identifies one work (a source with the wrong key).
  */
 export function matchWork<C extends Candidate>(title: string, candidates: C[]): C | null {
   const keys = catalogueKeys(title);
   const bare = bareTitle(title);
+  const key = musicalKey(title);
   let best: C[] = [];
   let bestScore = 0;
   for (const c of candidates) {
     const ck = catalogueKeys(c.title);
+    // Different keys mean different works, unless they share a number that identifies
+    // one work (K. 172, or Op.18 No.1, not a bare opus): then a source got the key wrong.
+    const ckey = key && musicalKey(c.title);
+    const unique = [...keys].some((k) => ck.has(k) && (!k.startsWith("op:") || k.includes("/")));
+    if (key && ckey && key !== ckey && !unique) continue;
+    const sameBare = bare.length > 3 && bare === bareTitle(c.title);
+    // 4: a number that identifies one work (K. 172, G.215, Op.18 No.1); opus numbers are
+    // reused, so a shared bare opus is weaker: 3, or 2 if only one side names a No.
+    let catalogue = 0;
+    if (unique) catalogue = 4;
+    else if ([...keys].some((k) => k.startsWith("op:") && !k.includes("/") && ck.has(k))) {
+      // Same opus; if both name different sub-numbers it's a different work.
+      const mine = subKeys(keys);
+      const theirs = subKeys(ck);
+      catalogue = mine.length && theirs.length ? 0 : mine.length || theirs.length ? 2 : 3;
+    }
     let score = 0;
-    const exactSub = subKeys(keys).some((k) => ck.has(k));
-    if (exactSub) score = 3;
-    else {
-      const shared = [...keys].some((k) => !k.includes("/") && ck.has(k));
-      if (shared) {
-        // Same opus/catalogue number. If both specify different sub-numbers it's a different work.
-        const mine = subKeys(keys);
-        const theirs = subKeys(ck);
-        if (mine.length && theirs.length) score = 0;
-        else score = mine.length || theirs.length ? 2 : 3;
-      } else if (keys.size === 0 && ck.size === 0 && bare.length > 3 && bare === bareTitle(c.title)) {
-        score = 1;
-      }
+    if (catalogue) score = catalogue * 2 + (sameBare ? 1 : 0);
+    else if (sameBare) {
+      const oneSided = !(keys.size && ck.size);
+      const otherSystem = ![...systems(keys)].some((s) => systems(ck).has(s)) && /\d/.test(bare);
+      if (oneSided || otherSystem) score = 1;
     }
     if (score > bestScore) [best, bestScore] = [[c], score];
     else if (score === bestScore && score > 0) best.push(c);
@@ -135,8 +189,8 @@ export class ComposerIndex {
         const { surname, given } = splitImslpName(cand);
         const fullStr = ` ${full.join(" ")} `;
         if (!fullStr.includes(` ${surname} `) && !surname.endsWith(` ${full.at(-1)}`)) continue;
-        const firstGiven = given.find((g) => g.length > 1);
-        if (firstGiven && !full.includes(firstGiven)) continue;
+        // All given names must agree ("Bach, Johann Christian" is not Johann Sebastian).
+        if (given.some((g) => g.length > 1 && !full.includes(g))) continue;
         hits.add(cand);
       }
     }

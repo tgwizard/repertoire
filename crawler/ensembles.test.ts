@@ -25,4 +25,6 @@ test("Open Opus titles", () => {
   assert.deepEqual(openOpusEnsemble("Violin Concerto in D major, op. 77", "Orchestral", 1833), decodeEnsemble("violin,orchestra"));
   assert.equal(openOpusEnsemble("Violin Sonata in G minor", "Chamber", 1685), null); // continuo era
   assert.equal(openOpusEnsemble("Serenade", "Chamber", 1833), null);
+  assert.equal(openOpusEnsemble("Symphony no. 14, for soprano, bass, strings and percussion", "Orchestral", 1906), null);
+  assert.equal(openOpusEnsemble("Violin Concerto in B flat major, op. 7/i, no. 2", "Orchestral", 1678), null);
 });

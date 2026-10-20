@@ -12,43 +12,73 @@ A **crawler** (`crawler/`) builds a static index from five open sources, and the
 |---|---|---|
 | [IMSLP](https://imslp.org) | Exact instrumentation (its `For …` categories), works, eras, whether a work has commercial recordings | CC BY-SA 4.0 |
 | [Wikipedia](https://en.wikipedia.org) | Curated `Compositions for …` categories: a "this is repertoire" signal, and works IMSLP lacks | CC BY-SA 4.0 |
-| [Wikidata](https://www.wikidata.org) | Links between IMSLP, Wikipedia and MusicBrainz; composer dates; years | CC0 |
+| [Wikidata](https://www.wikidata.org) | The hub linking IMSLP, Wikipedia and MusicBrainz; composer dates; years | CC0 |
 | [Open Opus](https://openopus.org) | Popular and recommended works | CC0 |
 | [MusicBrainz](https://musicbrainz.org) | Number of recordings per work (core data only) | CC0 |
 
-IMSLP is the backbone because it's the only open source with exact instrumentation. The other sources add ranking signals, and add works IMSLP doesn't have (typically 20th-century works still in copyright), but only where a line-up is stated unambiguously. `crawler/ensembles.ts` lists exactly which category names and titles map to which line-ups. Every work in the app shows which sources it comes from and how its ranking was computed.
+IMSLP is the backbone because it's the only open source with exact instrumentation. The other sources add ranking signals, and add works IMSLP doesn't have (typically 20th-century works still in copyright), but only where they state a line-up unambiguously.
 
-### Crawling
+### 1. Crawl
 
-```sh
-npm run crawl                       # all stages, then build the index into public/data/
-npm run crawl -- imslp build        # specific stages: imslp, wikipedia, wikidata, openopus, composers, musicbrainz, build
-npm run crawl -- --min-works 20     # skip small IMSLP categories (quicker first run)
-npm run crawl -- --mb-budget 1000   # MusicBrainz lookups this run (1 per second)
-npm run index                       # rebuild the index from what's already crawled
+`npm run crawl` runs these stages in order (or name some: `npm run crawl -- wikidata build`):
+
+| Stage | Fetches | Refreshed |
+|---|---|---|
+| `imslp` | all `For …` instrumentation categories (~11k) and their works, with era and recording tags | when a category's size changes, else after 30–90 days |
+| `wikipedia` | members of the `Compositions for …` categories in `crawler/ensembles.ts` | weekly |
+| `wikidata` | composers and works with IMSLP ids, works tagged with an ensemble, details for Wikipedia-listed works; follows IMSLP redirects for renamed pages | weekly |
+| `openopus` | the full work dump | weekly |
+| `composers` | IMSLP composer eras (`People from the X era`) | every 150–210 days |
+| `musicbrainz` | recording counts, most notable works first, `--mb-budget` per run (1 request/second) | every 45–75 days |
+| `build` | merges, matches, ranks; writes the index and exports | each run |
+
+The crawler is polite: requests go one at a time per host, with a minimum gap, and identify the project in the `User-Agent`. It's resilient: every response is cached on disk, so a crawl can be interrupted and resumed, failed requests retry with backoff, and a failed source falls back to its previous data. Cache lifetimes are staggered per item so they don't all expire at once, and a full run deletes cache entries it didn't use. The first crawl takes a few hours, mostly IMSLP; later runs take minutes. Use `--min-works 20` to skip small IMSLP categories for a quick local trial.
+
+### 2. Match
+
+Sources share no ids except through Wikidata, so works and composers are matched in this order (`crawler/match.ts`):
+
+- **Composers:** IMSLP's name ("Prokofiev, Sergey") via Wikidata's IMSLP id; for Open Opus, via Wikidata's English label ("Sergei Prokofiev"), else by surname with all given names agreeing.
+- **Works:** Wikidata's IMSLP id first. Otherwise, within the same composer:
+  1. a shared catalogue number (Op., K., BWV, D., Hob., M., CD, Sz., and others), exact sub-numbers first (Op.18 No.1 before "String Quartets, Op.18"); an equal title breaks ties, since opus numbers get reused;
+  2. else an equal title once catalogue numbers, keys and punctuation are removed ("String Quartet No. 1" ≈ "String Quartet No.1, Op.50"), if only one side has catalogue numbers, or they use different systems and the title has a number.
+  
+  Different keys, or different numbers in the same catalogue, mean different works. Ambiguous matches are left unmatched rather than guessed.
+- **Line-ups:** IMSLP's categories win. Another source only sets a work's line-up when IMSLP has none for it, using the explicit mappings in `crawler/ensembles.ts`, with sanity checks: a title's group size ("Sextet") must match, and Wikidata's instrumentation must list nothing else.
+
+### 3. Rank
+
+A work's score adds up evidence that it's established repertoire (`SIGNALS` in `src/shared/data.ts`): popular or recommended in Open Opus, commercial recordings or audio on IMSLP, an English Wikipedia article, a Wikipedia `Compositions for …` listing, MusicBrainz recording counts, and Wikidata notability of the work and composer. 6 or more counts as core repertoire. Each line-up lists originals first, then arrangements, each by score.
+
+### 4. Storage and structure
+
+```
+.cache/http/                 raw responses (the crawl cache), keyed by request
+.cache/stages/<stage>.json   each stage's normalized output, the input to build
+.cache/export/               the downloadable dataset
+public/data/                 the app's index (deployed as static assets)
+  ensembles.json             line-up key → [original works, arrangement-only works, shard numbers]
+  shards/<n>.json            works for one or more line-ups, in rank order, with their composers
+  meta.json                  dataset version, build time, per-source counts and fetch times
 ```
 
-The crawler is polite: requests go one at a time per host, with a minimum gap, and identify the project in the `User-Agent`. It is also resilient: every response is cached under `.cache/`, so a crawl can be interrupted and resumed. Failed requests retry with backoff, and a source that fails falls back to its previous data. Re-runs are incremental. IMSLP categories are only re-fetched when their size changes, or after 30–90 days, staggered per category so they don't all expire at once. Wikipedia, Wikidata and Open Opus are refreshed weekly. MusicBrainz counts accumulate across runs, most notable works first. After a full run, cache entries that run didn't use are deleted. Keep `.cache/` between runs (in CI, with `actions/cache`); deleting it forces a full re-crawl.
+A line-up key lists instrument ids alphabetically, with counts: `cello,viola,violin*2`. A work is identified by its origin: `imslp:<pageid>`, `wd:<Wikidata QID>` or `oo:<hash>`. Types for all files are in `src/shared/data.ts`.
 
-The first full crawl takes a couple of hours, mostly IMSLP. Later runs take minutes.
+The **export** (`repertoire-csv.zip`, `repertoire.sqlite.gz`) has five tables: `works`, `composers`, `ensembles`, `work_ensembles` (which works are for which line-ups, and which sources say so) and `sources` (fetch times, licenses).
 
-### Index, versions and export
-
-`npm run index` writes the app's index to `public/data/`: `ensembles.json` (line-ups and counts), `shards/*.json` (works per line-up, in rank order) and `meta.json` (build time, what each source contributed). It also writes the full dataset as a **zip of CSVs** and a **SQLite database** to `.cache/export/`.
-
-Datasets are published as immutable versions to a public Cloudflare R2 bucket, at `https://repertoire-data.tgwizard.com/datasets/`:
+**Versions** are published immutably to a public Cloudflare R2 bucket, at `https://repertoire-data.tgwizard.com/datasets/`:
 
 ```
-datasets/latest.json                    # the current version, with checksums
-datasets/<version>/index.zip            # the app's index
-datasets/<version>/repertoire-csv.zip   # downloads, linked from the site's footer
+datasets/latest.json                    the current version, with checksums
+datasets/<version>/index.zip            public/data as one archive
+datasets/<version>/repertoire-csv.zip   downloads, linked from the site's footer
 datasets/<version>/repertoire.sqlite.gz
 datasets/<version>/meta.json
 ```
 
 ```sh
 npm run data:refresh    # crawl + publish: what the scheduled job does
-npm run data:publish    # publish what's in public/data as a new version (needs `cf auth login`)
+npm run data:publish    # publish public/data as a new version (needs `cf auth login`)
 npm run data:pull       # download the latest version into public/data (no credentials)
 npm run data:pull -- --version 20261019T220512Z
 ```
