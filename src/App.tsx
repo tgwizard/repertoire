@@ -98,11 +98,15 @@ export function App() {
               onIncludeArrChange={setIncludeArr}
             />
           </aside>
-          <main className="main">{main()}</main>
+          {/* The footer lives in the results column so the layout reaches the bottom of the
+              page; otherwise its end pushes the sticky sidebar up, which jumps on "Load more". */}
+          <main className="main">
+            {main()}
+            <Footer meta={meta} />
+          </main>
         </div>
       )}
-
-      <Footer meta={meta} />
+      {(loadError || !index) && <Footer meta={meta} />}
     </div>
   );
 }

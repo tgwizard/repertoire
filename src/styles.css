@@ -79,7 +79,7 @@ button:disabled {
 .page {
   max-width: 1320px;
   margin: 0 auto;
-  padding: 28px 24px 64px;
+  padding: 28px 24px 0;
 }
 
 /* ---- Masthead ---- */
@@ -750,7 +750,7 @@ code {
 }
 
 .footer {
-  margin-top: 64px;
+  margin: 64px 0 32px;
   padding-top: 20px;
   border-top: 1px solid var(--line);
   color: var(--muted);
@@ -827,7 +827,7 @@ code {
 
 @media (max-width: 640px) {
   .page {
-    padding: 18px 16px 48px;
+    padding: 18px 16px 0;
   }
 
   .masthead {
