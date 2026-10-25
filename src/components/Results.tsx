@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApi } from "../lib/api";
 import { describe, parseEnsembleKey, playerCount } from "../lib/instrumentation";
-import { useDebounced } from "../lib/useDebounced";
 import { useWorks } from "../lib/useWorks";
 import { ERAS, lineupSourceUrl, SOURCES, type SourceId, type WorkSort } from "../shared/data";
 import { WorkList } from "./WorkList";
@@ -19,6 +18,9 @@ interface Props {
   onSmallerChange: (v: boolean) => void;
   /** Smaller groups (2+ players) drawn from this line-up that have works */
   smallerGroups: number;
+  /** Search text from the finder's search box */
+  q: string;
+  onSearchEverywhere: () => void;
 }
 
 interface LineupInfo {
@@ -63,16 +65,14 @@ function LineupSources({ lineup }: { lineup: string }) {
   );
 }
 
-export function Results({ lineup, total, includeArr, smaller, onSmallerChange, smallerGroups }: Props) {
+export function Results({ lineup, total, includeArr, smaller, onSmallerChange, smallerGroups, q, onSearchEverywhere }: Props) {
   const players = playerCount(parseEnsembleKey(lineup));
   const [eras, setEras] = useState<Set<string>>(new Set());
   const [composer, setComposer] = useState("");
-  const [query, setQuery] = useState("");
   const [sort, setSort] = useState<WorkSort>("rank");
   const [show, setShow] = useState<Show>("all");
   const [minPlayers, setMinPlayers] = useState(2);
   const [within, setWithin] = useState("");
-  const q = useDebounced(query.trim(), 250);
 
   // Switching to smaller groups: largest groups first reads best.
   useEffect(() => setSort(smaller ? "players" : "rank"), [smaller]);
@@ -126,7 +126,7 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
         <h2>
           {filtering ? (
             <>
-              {fmt.format(matching)} <span className="muted">works match</span>
+              {fmt.format(matching)} <span className="muted">{matching === 1 ? "work matches" : "works match"}{q && ` “${q}”`}</span>
             </>
           ) : (
             <>
@@ -139,6 +139,11 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
         </h2>
         <p className="results-sub">
           {filtering ? `For ${description}${smaller ? " and smaller groups" : ""}. ` : smaller ? "Largest groups first. " : "Most established first. "}
+          {q && (
+            <button className="link-button" onClick={onSearchEverywhere}>
+              Search all line-ups instead
+            </button>
+          )}
           {error && <span className="error-text"> {error}</span>}
         </p>
       </div>
@@ -201,7 +206,6 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
           ))}
         </div>
         <div className="filter-row">
-          <input type="search" placeholder="Search titles and composers…" value={query} onChange={(e) => setQuery(e.target.value)} />
           <select value={composer} onChange={(e) => setComposer(e.target.value)} aria-label="Composer">
             <option value="">All composers{f ? ` (${fmt.format(f.composers.length)}${f.composers.length === 300 ? "+" : ""})` : ""}</option>
             {(f?.composers ?? []).map((c) => (

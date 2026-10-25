@@ -98,13 +98,6 @@ button:disabled {
   margin: 0;
 }
 
-.masthead-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px 24px;
-  flex-wrap: wrap;
-}
 
 .home-link {
   color: inherit;
@@ -116,11 +109,6 @@ button:disabled {
   color: var(--accent);
 }
 
-.tagline {
-  color: var(--muted);
-  margin: 6px 0 0;
-  font-size: 1.02rem;
-}
 
 .eyebrow {
   font: 600 0.72rem/1 var(--sans);
@@ -185,18 +173,27 @@ button:disabled {
 .layout {
   display: grid;
   grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
-  gap: 40px;
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "side search"
+    "side main";
+  gap: 0 40px;
   align-items: start;
 }
 
+.layout > .main-search {
+  grid-area: search;
+  margin-bottom: 24px;
+}
+
+.layout > .main {
+  grid-area: main;
+}
+
+/* Scrolls with the page: no scrolling box of its own, nothing pinned. */
 .sidebar {
-  position: sticky;
-  top: 16px;
-  max-height: calc(100vh - 32px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  padding: 2px 6px 16px 2px;
+  grid-area: side;
+  padding-bottom: 16px;
 }
 
 .main {
@@ -731,47 +728,33 @@ code {
   color: inherit;
 }
 
-.footer-dataset strong {
+.footer p {
+  margin: 0 0 6px;
+}
+
+.footer strong {
   color: var(--ink);
   font-weight: 600;
 }
 
-.footer-sources {
-  border-collapse: collapse;
-  margin: 12px 0;
-}
 
-.footer-sources caption {
-  text-align: left;
-  font: 600 0.68rem/1 var(--sans);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  padding-bottom: 8px;
-}
 
-.footer-sources th,
-.footer-sources td {
-  text-align: left;
-  padding: 3px 16px 3px 0;
-  font-weight: 400;
-  vertical-align: top;
-}
 
-.footer-sources th {
-  color: var(--ink);
-  font-weight: 500;
-}
+
 
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);
-    gap: 20px;
+    grid-template-rows: auto;
+    grid-template-areas: "search" "side" "main";
+    gap: 0;
+  }
+
+  .layout > .main-search {
+    margin-bottom: 16px;
   }
 
   .sidebar {
-    position: static;
-    max-height: none;
-    overflow: visible;
     padding: 0;
   }
 
@@ -784,7 +767,7 @@ code {
   }
 
   /* While picking, keep the ensemble (and its "Show N works" button) in view. */
-  .ensemble-card.picking {
+  .sidebar .ensemble-card.picking {
     position: sticky;
     top: 8px;
     z-index: 2;
@@ -804,44 +787,31 @@ code {
     margin-bottom: 16px;
   }
 
-  .tagline {
-    font-size: 0.95rem;
-  }
 
   .filter-row select {
     flex: 1 1 100%;
   }
 
-  .footer-sources td:nth-child(2) {
-    display: none;
-  }
 
   .empty-state {
     padding: 20px;
   }
 }
 
-.tagline a {
-  color: inherit;
-  text-underline-offset: 2px;
-}
 
-.tagline a:hover {
-  color: var(--accent);
-}
 
 /* ---- Search ---- */
 
 .search-box {
   position: relative;
-  flex: 0 1 380px;
-  min-width: 0;
+  max-width: 640px;
 }
 
 .search-box input {
   width: 100%;
   font: inherit;
-  padding: 9px 14px;
+  font-size: 1.02rem;
+  padding: 11px 16px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--surface);
@@ -994,9 +964,17 @@ code {
   font-weight: 500;
 }
 
+.composer-matches {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+}
+
 .scorings,
-.score-parts,
-.composer-cards {
+.score-parts {
   margin: 0;
   padding-left: 18px;
   display: flex;
@@ -1033,10 +1011,8 @@ code {
   max-width: 820px;
 }
 
-@media (max-width: 640px) {
-  .search-box {
-    flex: 1 1 100%;
-  }
+.page-detail > .search-box {
+  margin: 12px 0 16px;
 }
 
 /* ---- About ---- */

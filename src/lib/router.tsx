@@ -7,18 +7,17 @@ export type Route =
   | { name: "finder" }
   | { name: "work"; id: string }
   | { name: "composer"; id: string }
-  | { name: "search"; q: string }
   | { name: "about" }
   | { name: "notfound" };
 
-export function parseRoute(pathname: string, search: string): Route {
-  if (pathname === "/" || pathname === "") return { name: "finder" };
+export function parseRoute(pathname: string): Route {
+  // Search is part of the finder; /search?q=… is an older address for it.
+  if (pathname === "/" || pathname === "" || pathname === "/search") return { name: "finder" };
   let m = /^\/work\/([0-9a-z]{8})(?:\/[^/]*)?\/?$/.exec(pathname);
   if (m) return { name: "work", id: m[1]! };
   m = /^\/composer\/([0-9a-z]{8})(?:\/[^/]*)?\/?$/.exec(pathname);
   if (m) return { name: "composer", id: m[1]! };
   if (pathname === "/about" || pathname === "/about/") return { name: "about" };
-  if (pathname === "/search") return { name: "search", q: new URLSearchParams(search).get("q") ?? "" };
   return { name: "notfound" };
 }
 
@@ -30,16 +29,26 @@ export function navigate(to: string, opts: { replace?: boolean } = {}) {
   window.dispatchEvent(new Event(EVENT));
 }
 
-export function useLocation(): { pathname: string; search: string } {
-  const read = () => ({ pathname: location.pathname, search: location.search });
-  const [loc, setLoc] = useState(read);
+export interface Location {
+  pathname: string;
+  search: string;
+  /** Counts navigations, so going to the same URL again still registers */
+  n: number;
+  /** Back or forward (restore where you were) rather than a link (start fresh) */
+  pop: boolean;
+}
+
+export function useLocation(): Location {
+  const read = (n: number, pop: boolean) => ({ pathname: location.pathname, search: location.search, n, pop });
+  const [loc, setLoc] = useState(() => read(0, false));
   useEffect(() => {
-    const update = () => setLoc(read());
-    window.addEventListener("popstate", update);
-    window.addEventListener(EVENT, update);
+    const onPop = () => setLoc((l) => read(l.n + 1, true));
+    const onNavigate = () => setLoc((l) => read(l.n + 1, false));
+    window.addEventListener("popstate", onPop);
+    window.addEventListener(EVENT, onNavigate);
     return () => {
-      window.removeEventListener("popstate", update);
-      window.removeEventListener(EVENT, update);
+      window.removeEventListener("popstate", onPop);
+      window.removeEventListener(EVENT, onNavigate);
     };
   }, []);
   return loc;

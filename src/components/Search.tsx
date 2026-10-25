@@ -1,130 +1,77 @@
-import { useEffect, useRef, useState } from "react";
-import { composerPath, lifespan, searchPath, useApi, workPath, type SearchResults } from "../lib/api";
-import { Link, navigate } from "../lib/router";
-import { useDebounced } from "../lib/useDebounced";
+import { composerPath, lifespan, useApi, type SearchResults as Results } from "../lib/api";
+import { Link } from "../lib/router";
 import { useWorks, WORKS_PAGE } from "../lib/useWorks";
 import { WorkList } from "./WorkList";
 
 const fmt = new Intl.NumberFormat("en");
 
-/** The masthead search: suggestions as you type, Enter for all results. */
-export function SearchBox({ initial }: { initial: string }) {
-  const [q, setQ] = useState(initial);
-  const [open, setOpen] = useState(false);
-  const debounced = useDebounced(q.trim(), 200);
-  const { data } = useApi<SearchResults>(open && debounced.length >= 2 ? `/api/search?q=${encodeURIComponent(debounced)}&limit=6` : null);
-  const box = useRef<HTMLFormElement>(null);
+interface FieldProps {
+  value: string;
+  onChange: (q: string) => void;
+  /** Searching within a line-up rather than everything */
+  narrowed: boolean;
+}
 
-  useEffect(() => setQ(initial), [initial]);
-  useEffect(() => {
-    const close = (e: MouseEvent) => !box.current?.contains(e.target as Node) && setOpen(false);
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, []);
-
-  const go = (to: string) => {
-    setOpen(false);
-    navigate(to);
-    window.scrollTo(0, 0);
-  };
-  const results = data && debounced.length >= 2 ? data : null;
-
+/** The finder's search: everything, or within the picked line-up. */
+export function SearchField({ value, onChange, narrowed }: FieldProps) {
   return (
-    <form
-      className="search-box"
-      role="search"
-      ref={box}
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (q.trim()) go(searchPath(q.trim()));
-      }}
-    >
+    <form className="search-box" role="search" onSubmit={(e) => e.preventDefault()}>
       <input
         type="search"
         name="q"
-        placeholder="Search works and composers"
+        placeholder={narrowed ? "Search within this line-up: title, composer, Op. or K. number…" : "Search works and composers"}
         aria-label="Search works and composers"
         autoComplete="off"
-        value={q}
-        onChange={(e) => (setQ(e.target.value), setOpen(true))}
-        onFocus={() => setOpen(true)}
-        onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
       />
-      {open && results && (results.composers.length > 0 || results.works.length > 0) && (
-        <div className="suggestions">
-          {results.composers.slice(0, 3).map((c) => (
-            <button type="button" key={c.id} className="suggestion" onClick={() => go(composerPath(c))}>
-              <span className="suggestion-title">{c.name}</span>
-              <span className="muted small">
-                {lifespan(c)} · {fmt.format(c.works)} works
-              </span>
-            </button>
-          ))}
-          {results.works.map((w) => (
-            <button type="button" key={w.id} className="suggestion" onClick={() => go(workPath(w))}>
-              <span className="suggestion-title">{w.title}</span>
-              <span className="muted small">{w.composer?.name}</span>
-            </button>
-          ))}
-          <button type="submit" className="suggestion all">
-            All {fmt.format(results.total)} results for “{debounced}”
-          </button>
-        </div>
-      )}
     </form>
   );
 }
 
-export function SearchPage({ q }: { q: string }) {
-  useEffect(() => {
-    document.title = `${q} · Search · Repertoire Finder`;
-  }, [q]);
-  const query = q ? `q=${encodeURIComponent(q)}` : null;
-  // /api/search pages like /api/works; the first page (shared with useWorks' cache) has the composers.
+/** Search across every line-up: composers first, then works by relevance. */
+export function SearchResults({ q }: { q: string }) {
+  const query = `q=${encodeURIComponent(q)}`;
   const { works, total, loading, hasMore, loadMore } = useWorks(query, "/api/search");
-  const first = useApi<SearchResults>(query ? `/api/search?${query}&limit=${WORKS_PAGE}&offset=0&facets=1` : null);
-
-  if (!q) return <div className="notice">Type something to search for.</div>;
+  // The first page (shared with useWorks' cache) has the matching composers.
+  const first = useApi<Results>(`/api/search?${query}&limit=${WORKS_PAGE}&offset=0&facets=1`);
   const composers = first.data?.composers ?? [];
+
   return (
-    <article className="page-detail">
-      <header className="detail-head">
-        <p className="eyebrow">Search</p>
-        <h1>“{q}”</h1>
-        {first.data && <p className="muted">{total === 0 ? "Nothing found. Try fewer words, or a composer's surname." : `${fmt.format(total)} works`}</p>}
-      </header>
+    <section className="results" aria-label="Search results">
+      <div className="results-head">
+        <h2>
+          {first.data ? fmt.format(total) : "…"} <span className="muted">{total === 1 ? "work matches" : "works match"} “{q}”</span>
+        </h2>
+        <p className="results-sub">In every line-up. Pick players to narrow it down.</p>
+      </div>
+      {composers.length > 0 && (
+        <ul className="composer-matches">
+          {composers.map((c) => (
+            <li key={c.id}>
+              <Link href={composerPath(c)}>{c.name}</Link>
+              <span className="muted small">
+                {" "}
+                {lifespan(c)} · {fmt.format(c.works)} works
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className={loading && works.length ? "works-wrap stale" : "works-wrap"}>
+        <WorkList works={works} showLineup />
+      </div>
       {loading && !works.length && (
         <p className="muted">
           <span className="spinner" /> Searching…
         </p>
       )}
-      {composers.length > 0 && (
-        <section className="detail-section">
-          <h2>Composers</h2>
-          <ul className="composer-cards">
-            {composers.map((c) => (
-              <li key={c.id}>
-                <Link href={composerPath(c)}>{c.name}</Link>
-                <span className="muted small">
-                  {" "}
-                  {lifespan(c)} · {fmt.format(c.works)} works
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
+      {!loading && first.data && total === 0 && <p className="muted">Nothing found. Try fewer words, or a composer's surname.</p>}
+      {hasMore && (
+        <button className="more" onClick={loadMore} disabled={loading}>
+          {loading ? "Loading…" : `Load more (${fmt.format(total - works.length)} left)`}
+        </button>
       )}
-      {works.length > 0 && (
-        <section className="detail-section">
-          <h2>Works</h2>
-          <WorkList works={works} showLineup />
-          {hasMore && (
-            <button className="more" onClick={loadMore} disabled={loading}>
-              {loading ? "Loading…" : `Load more (${fmt.format(total - works.length)} left)`}
-            </button>
-          )}
-        </section>
-      )}
-    </article>
+    </section>
   );
 }

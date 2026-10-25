@@ -76,4 +76,4 @@ export const loadMeta = () => api<Meta>(metaPath);
 export const loadLineups = () => api<LineupsIndex>(lineupsPath);
 export type { ComposerDetail, SearchResults, WorkDetail, WorksPage };
 
-export { composerPath, finderPath, lifespan, searchPath, workPath } from "../shared/paths";
+export { composerPath, finderPath, lifespan, workPath } from "../shared/paths";

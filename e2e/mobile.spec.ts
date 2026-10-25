@@ -14,7 +14,7 @@ test("on a phone, a preset collapses the picker; clearing brings it back", async
 });
 
 test("on a phone, nothing scrolls sideways", async ({ page }) => {
-  for (const path of ["/?i=violin:2,viola,cello&sub=1", "/about", "/search?q=brahms"]) {
+  for (const path of ["/?i=violin:2,viola,cello&sub=1", "/about", "/?q=brahms"]) {
     await page.goto(path);
     await page.waitForLoadState("networkidle");
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

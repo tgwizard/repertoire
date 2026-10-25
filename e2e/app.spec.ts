@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 // The app in a browser: finding works for a line-up, smaller groups, work and
 // composer pages, search, and the server-rendered pages.
 
@@ -11,7 +12,8 @@ function watchErrors(page: Page) {
   return () => expect(errors, "console errors").toEqual([]);
 }
 
-const works = (page: Page) => page.locator(".works .work");
+// Visible ones only: the finder stays mounted (hidden) under other pages.
+const works = (page: Page) => page.locator(".works .work").filter({ visible: true });
 
 test("pick a preset: the line-up's works, most established first, and more on request", async ({ page }) => {
   const noErrors = watchErrors(page);
@@ -28,6 +30,54 @@ test("pick a preset: the line-up's works, most established first, and more on re
   noErrors();
 });
 
+test("the logo starts over: no line-up, no search, top of the page; back restores", async ({ page }) => {
+  await page.goto("/?i=flute,oboe,clarinet,bassoon,horn,piano&sub=1");
+  await expect(works(page).first()).toBeVisible();
+  const box = page.getByRole("searchbox", { name: "Search works and composers" });
+  await box.fill("poulenc");
+  await expect(page).toHaveURL(/q=poulenc/);
+  await page.locator(".site-title").getByRole("link").click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Who's playing?" })).toBeVisible();
+  await expect(page.locator(".chips")).toHaveCount(0);
+  await expect(box).toHaveValue("");
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  await page.goBack();
+  await expect(page.getByLabel(/Include smaller groups/)).toBeChecked();
+  await expect(box).toHaveValue("poulenc");
+  await expect(works(page).first()).toContainText("Sextet");
+});
+
+test("search everything, then narrow it down by picking players", async ({ page }) => {
+  const noErrors = watchErrors(page);
+  await page.goto("/");
+  const box = page.getByRole("searchbox", { name: "Search works and composers" });
+  await box.fill("brahms");
+  await expect(page.locator(".results-head h2")).toContainText("works match “brahms”");
+  await expect(page.locator(".composer-matches")).toContainText("Johannes Brahms");
+  await expect(works(page).first()).toContainText("Johannes Brahms");
+  // Picking a line-up keeps the search: Brahms for clarinet quintet.
+  await page.getByRole("button", { name: /^Clarinet quintet \d/ }).click();
+  await expect(page).toHaveURL(/\?i=clarinet,violin:2,viola,cello&q=brahms$/);
+  await expect(page.locator(".results-head h2")).toContainText(/match(es)? “brahms”/);
+  await expect(works(page).first()).toContainText("Clarinet Quintet, Op.115");
+  // And widening it again; back returns to the line-up.
+  await page.getByRole("button", { name: "Search all line-ups instead" }).click();
+  await expect(page).toHaveURL(/\/\?q=brahms$/);
+  await expect(page.locator(".results-head h2")).toContainText("works match “brahms”");
+  await page.goBack();
+  await expect(page.locator(".chips")).toContainText("clarinet");
+  await expect(works(page).first()).toContainText("Clarinet Quintet, Op.115");
+  noErrors();
+});
+
+test("search finds catalogue numbers; old /search links still work", async ({ page }) => {
+  await page.goto("/search?q=k581");
+  await expect(page).toHaveURL(/\/\?q=k581$/);
+  await expect(page.getByRole("searchbox", { name: "Search works and composers" })).toHaveValue("k581");
+  await expect(works(page).first()).toContainText("K.581");
+});
+
 test("filters narrow the list, from facets with counts", async ({ page }) => {
   await page.goto("/?i=violin:2,viola,cello");
   await expect(works(page).first()).toBeVisible();
@@ -35,7 +85,7 @@ test("filters narrow the list, from facets with counts", async ({ page }) => {
   const expected = Number((await romantic.locator(".era-count").textContent())!.replace(/,/g, ""));
   await romantic.click();
   await expect(page.locator(".results-head h2")).toContainText(`${expected.toLocaleString("en")} works match`);
-  await page.getByPlaceholder("Search titles and composers…").fill("debussy");
+  await page.getByRole("searchbox", { name: "Search works and composers" }).fill("debussy");
   await expect(works(page).first()).toContainText("String Quartet in G minor, Op.10");
   await expect(works(page)).toHaveCount(1);
 });
@@ -71,7 +121,7 @@ test("a work page, and back to the list where you left it", async ({ page }) => 
 });
 
 test("a work's line-up links to the finder for that line-up", async ({ page }) => {
-  await page.goto("/search?q=brahms%20clarinet%20quintet");
+  await page.goto("/?q=brahms%20clarinet%20quintet");
   await works(page).first().getByRole("link", { name: "Clarinet Quintet, Op.115" }).click();
   await page.locator(".scorings").getByRole("link", { name: "clarinet, 2 violins, viola, cello" }).click();
   await expect(page).toHaveURL(/\?i=clarinet,violin:2,viola,cello$/);
@@ -79,13 +129,10 @@ test("a work's line-up links to the finder for that line-up", async ({ page }) =
   await expect(works(page).first()).toBeVisible();
 });
 
-test("search: suggestions as you type, then a composer page filtered by line-up", async ({ page }) => {
+test("a composer page from search, filtered by line-up", async ({ page }) => {
   const noErrors = watchErrors(page);
-  await page.goto("/");
-  await page.getByRole("searchbox", { name: "Search works and composers" }).fill("brahms");
-  const suggestion = page.locator(".suggestion").filter({ hasText: "Johannes Brahms" }).first();
-  await expect(suggestion).toBeVisible();
-  await suggestion.click();
+  await page.goto("/?q=brahms");
+  await page.locator(".composer-matches").getByRole("link", { name: "Johannes Brahms" }).click();
   await expect(page).toHaveURL(/\/composer\/[0-9a-z]{8}\/johannes-brahms$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Johannes Brahms");
   await page.getByRole("button", { name: /^\d+ more$/ }).click(); // Brahms wrote for many line-ups
@@ -93,15 +140,6 @@ test("search: suggestions as you type, then a composer page filtered by line-up"
   await expect(page).toHaveURL(/\?lineup=cello,clarinet,viola,violin\*2/);
   await expect(works(page).first()).toContainText("Clarinet Quintet, Op.115");
   noErrors();
-});
-
-test("search page: all results for a query", async ({ page }) => {
-  await page.goto("/");
-  const box = page.getByRole("searchbox", { name: "Search works and composers" });
-  await box.fill("k581");
-  await box.press("Enter");
-  await expect(page).toHaveURL(/\/search\?q=k581$/);
-  await expect(works(page).first()).toContainText("K.581");
 });
 
 test("work and composer pages are rendered on the server, for links and search engines", async ({ request }) => {
