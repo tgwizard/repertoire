@@ -41,13 +41,40 @@ test("IMSLP works get every instrumentation category as a line-up", () => {
 test("other sources link to IMSLP works instead of duplicating them", () => {
   const debussy = work("String Quartet in G minor, Op.10");
   const links = Object.fromEntries(all("SELECT provider, ref FROM links WHERE entity_id = ?", debussy.id).map((l) => [l.provider, l.ref]));
-  assert.deepEqual(links, { imslp: "1", wikidata: "Q1", wikipedia: "String Quartet (Debussy)", musicbrainz: "mb-debussy" });
+  assert.deepEqual(links, { imslp: "1", wikidata: "Q1", wikipedia: "String Quartet (Debussy)", musicbrainz: "mb-debussy", mutopia: "101" });
   assert.equal(debussy.year, 1893);
   assert.equal(debussy.recordings, 500);
   // Open Opus's "Clarinet Quintet in B minor, op. 115" is IMSLP's "Clarinet Quintet, Op.115".
   const brahms = work("Clarinet Quintet, Op.115");
   assert.deepEqual(JSON.parse(brahms.signals), ["imslp-recorded", "openopus-popular", "openopus-recommended"]);
   assert.deepEqual(JSON.parse(brahms.aliases), ["Clarinet Quintet in B minor, op. 115"]);
+});
+
+test("Mutopia editions link to the work they're a movement of; composers must match name and dates", () => {
+  const mutopia = all("SELECT l.ref, l.label, w.title FROM links l JOIN works w ON w.id = l.entity_id WHERE l.provider = 'mutopia'");
+  assert.deepEqual(mutopia, [{ ref: "101", label: "String Quartet (2nd movement) (String Quartet)", title: "String Quartet in G minor, Op.10" }]);
+  const source = all("SELECT items, matched, added FROM sources WHERE id = 'mutopia'")[0];
+  assert.deepEqual(source, { items: 3, matched: 1, added: null });
+});
+
+test("LIBRIS: borrow links for works we have, and works we didn't have from the library's instrumentation", () => {
+  const brahms = work("Clarinet Quintet, Op.115");
+  assert.deepEqual(all("SELECT ref, label, url FROM links WHERE entity_id = ? AND provider = 'libris'", brahms.id), [
+    { ref: "lb115", label: "Score and parts · Svensk Musik · 2001", url: "https://libris.kb.se/lb115" },
+  ]);
+  const hillborg = work("Kongsgaard variations, for string quartet");
+  assert.deepEqual(lineups(hillborg.id), [{ lineup: "cello,viola,violin*2", arrangement: 0 }]);
+  assert.deepEqual(all("SELECT ref FROM links WHERE entity_id = ? AND provider = 'libris' ORDER BY ref", hillborg.id), [{ ref: "lbkv1" }, { ref: "lbkv2" }]);
+  assert.deepEqual(all("SELECT name, born, died FROM composers WHERE id = ?", hillborg.composer_id), [{ name: "Anders Hillborg", born: 1954, died: null }]);
+  assert.equal(all("SELECT * FROM works WHERE title LIKE '%arr. for brass%'").length, 0);
+  assert.deepEqual(all("SELECT items, matched, added FROM sources WHERE id = 'libris'")[0], { items: 4, matched: 2, added: 1 });
+});
+
+test("a wrong IMSLP link on Wikidata doesn't split a composer: names decide", () => {
+  const haydn = all("SELECT c.id, c.name, c.born, c.died FROM composers c JOIN works w ON w.composer_id = c.id WHERE w.title LIKE 'String Quartet No.62%'")[0]!;
+  assert.deepEqual([haydn.name, haydn.born, haydn.died], ["Joseph Haydn", 1732, 1809]);
+  const links = all("SELECT provider, ref FROM links WHERE entity = 'composer' AND entity_id = ? ORDER BY provider", haydn.id);
+  assert.deepEqual(links, [{ provider: "imslp", ref: "Haydn, Joseph" }, { provider: "wikidata", ref: "Q14" }]);
 });
 
 test("works IMSLP lacks come in when a source states an exact line-up", () => {

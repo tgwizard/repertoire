@@ -9,7 +9,15 @@ const fmt = new Intl.NumberFormat("en");
 function LinkItem({ l }: { l: WorkLink }) {
   const name = PROVIDERS[l.provider].name;
   const text =
-    l.provider === "imslp" ? "Sheet music on IMSLP" : l.provider === "musicbrainz" && l.label ? `MusicBrainz · ${l.label.replace(/^(\d+)/, (n) => fmt.format(Number(n)))}` : name;
+    l.provider === "imslp"
+      ? "Sheet music on IMSLP"
+      : l.provider === "libris"
+        ? `Musik- och teaterbiblioteket, Stockholm${l.label ? `: ${l.label}` : ""}`
+        : l.provider === "mutopia"
+          ? `Engraved edition on Mutopia${l.label ? `: ${l.label}` : ""}`
+          : l.provider === "musicbrainz" && l.label
+            ? `MusicBrainz · ${l.label.replace(/^(\d+)/, (n) => fmt.format(Number(n)))}`
+            : name;
   return (
     <li>
       {l.url ? (
@@ -67,17 +75,28 @@ export function WorkPage({ id }: { id: string }) {
 
       <section className="detail-section">
         <h2>Get the music</h2>
-        {scores.length || libraries.length ? (
-          <ul className="link-list big">
-            {scores.map((l) => (
-              <LinkItem key={l.provider + l.ref} l={l} />
-            ))}
-            {libraries.map((l) => (
-              <LinkItem key={l.provider + l.ref} l={l} />
-            ))}
-          </ul>
-        ) : (
-          <p className="muted">No free score found. It may still be in copyright; look for it at a publisher or a music library.</p>
+        {scores.length > 0 && (
+          <>
+            <h3 className="subhead">Free online</h3>
+            <ul className="link-list big">
+              {scores.map((l) => (
+                <LinkItem key={l.provider + l.ref} l={l} />
+              ))}
+            </ul>
+          </>
+        )}
+        {libraries.length > 0 && (
+          <>
+            <h3 className="subhead">Borrow</h3>
+            <ul className="link-list">
+              {libraries.map((l) => (
+                <LinkItem key={l.provider + l.ref} l={l} />
+              ))}
+            </ul>
+          </>
+        )}
+        {!scores.length && !libraries.length && (
+          <p className="muted">No free score or library copy found. It may still be in copyright; look for it at a publisher or a music library.</p>
         )}
       </section>
 

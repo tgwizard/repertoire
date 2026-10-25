@@ -11,8 +11,11 @@ What the dataset is meant to be: every work for classical instruments, listed fo
 | [Wikidata](https://www.wikidata.org) | The links between the others (IMSLP pages, Wikipedia articles, MusicBrainz works), composition dates, composers' lifespans; works tagged with an ensemble. | CC0 |
 | [Open Opus](https://openopus.org) | Curated main works of well-known composers, marked popular or recommended. | CC0 |
 | [MusicBrainz](https://musicbrainz.org) | Recording counts (core data only). | CC0 |
+| [Mutopia](https://www.mutopiaproject.org) | Free engraved editions, linked from the works they belong to (often single movements, so links, not works). | links only |
+| [LIBRIS](https://libris.kb.se) | The sheet music held by Musik- och teaterbiblioteket, Stockholm (lends scores and parts in Sweden): links to borrow works we have, and works we lacked when the library states their instrumentation. | CC0 |
+| [GND](https://www.dnb.de/gnd) | The German National Library's musical works: instrumentation as structured data, opus and catalogue numbers, keys, dates; contemporary works too. | CC0 |
 
-Next in line: authority files with structured instrumentation (the German National Library's GND works, CC0; RISM, CC BY), Swedish library holdings through LIBRIS (CC0), and Mutopia. Sources without an open license (publishers, music information centres) can still be linked to, but not copied.
+Next in line: RISM (manuscripts and prints with library holdings, CC BY) and more libraries. Sources without an open license (publishers, music information centres) can still be linked to, but not copied.
 
 ## Crawl
 
@@ -26,6 +29,9 @@ Next in line: authority files with structured instrumentation (the German Nation
 | `openopus` | the full work dump | weekly |
 | `composers` | IMSLP composer eras | every 150–210 days |
 | `musicbrainz` | recording counts, most notable works first, a budget per run (1 request a second) | every 45–75 days |
+| `mutopia` | the catalogue file | weekly |
+| `libris` | Musik- och teaterbiblioteket's sheet music (~75k records), the fields we use | pages after 20–40 days |
+| `gnd` | the GND work dump (~85 MB), musical works kept; their composers looked up on Wikidata by GND id | dump after 60 days |
 | `build` | the dataset | each run |
 
 Cache lifetimes are staggered per item so a refresh doesn't refetch everything at once, and entries a full run didn't use are deleted.
@@ -38,7 +44,9 @@ The guiding rule: **a work is listed for a line-up only when a source says it's 
 2. **Composers** are matched through Wikidata's IMSLP ids, then for Open Opus through Wikidata's English names, else by surname with all given names agreeing.
 3. **Works** from other sources are matched to IMSLP works by shared ids first (Wikidata's IMSLP id), then within a composer by catalogue number (Op., K., BWV, D., Hob. and two dozen more; exact sub-numbers first), key and title once numbers and keys are set aside. Different keys or different numbers in the same catalogue mean different works; ties and ambiguity mean no match.
 4. **Works IMSLP lacks** come in only when a source states a line-up: a Wikipedia ensemble category, a Wikidata ensemble tag whose instruments all fit, or an Open Opus title naming a standard ensemble ("String Quartet no. 3", but not "…, for soprano and string quartet"). A title naming a group size must agree with it, and IMSLP's own categories always win.
-5. **Titles other sources use** are kept as aliases, so a search for "Dvořák American" finds IMSLP's "String Quartet No.12, Op.96".
+5. **Links only**: Mutopia editions attach to the work they're from; LIBRIS records of works we have add a link to borrow them. Composers from these match on surname and life dates (within a year).
+6. **New works from libraries and authority files** come in with care. LIBRIS: when the library's instrumentation is explicit and fully understood, and it's not an arrangement or an anthology; later editions match the uniform title. GND: when its instrumentation maps to ours and the work can't duplicate one we have (no work of the same title, and none for that line-up, unless all of those carry different numbers).
+7. **Titles other sources use** are kept as aliases, so a search for "Dvořák American" finds IMSLP's "String Quartet No.12, Op.96".
 
 ## Rank
 
@@ -46,7 +54,7 @@ Each work's score adds up evidence that it's played (`SIGNALS` and `scoreParts` 
 
 ## Persistent ids
 
-Works and composers have short ids (`3k5esqdj`) used in URLs and the downloads, which must survive rebuilds even as sources rename, merge or split records. Each entity is anchored to the source records it came from (`imslp:<page id>`, `wikidata:<QID>`, `openopus:<id>`), strongest first. A build reuses the previous dataset's id for any of its anchors; a new entity gets a hash of its strongest anchor. When two entities turn out to be one, the losing id redirects to the winner (the `redirects` table; the site and API answer with 301s). When one splits, the part with the stronger anchor keeps the id. An old id is never given to something else. `test/data/integrity.test.ts` checks ids stayed put since the previous build.
+Works and composers have short ids (`3k5esqdj`) used in URLs and the downloads, which must survive rebuilds even as sources rename, merge or split records. Each entity is anchored to the source records it came from (`imslp:<page id>`, `wikidata:<QID>`, `gnd:<id>`, `openopus:<id>`, `libris:<id>`), strongest first. A build reuses the previous dataset's id for any of its anchors; a new entity gets a hash of its strongest anchor. When two entities turn out to be one, the losing id redirects to the winner (the `redirects` table; the site and API answer with 301s). When one splits, the part with the stronger anchor keeps the id. An old id is never given to something else. `test/data/integrity.test.ts` checks ids stayed put since the previous build.
 
 ## The dataset
 
@@ -58,7 +66,7 @@ One SQLite database, the same in the downloads and in D1. Its tables (columns ar
 | `composers` | name, sort name, lifespan, era |
 | `lineups` | each line-up (`cello,viola,violin*2`), its players, counts of original and arrangement-only works, and the categories that define it |
 | `scorings` | which works are for which line-ups, original or arrangement, and which sources say so |
-| `links` | where to find works and composers: sheet music, articles, database records, by provider and the provider's own id |
+| `links` | where to find works and composers: free sheet music (IMSLP, Mutopia), library copies (LIBRIS), articles, database records (Wikidata, GND, MusicBrainz), by provider and the provider's own id |
 | `redirects` | ids merged into others |
 | `sources` | each source's fetch time, records pulled, matched and added, and license |
 | `meta` | version, build time, counts, stats |

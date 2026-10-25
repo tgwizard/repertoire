@@ -12,11 +12,14 @@ import { writeExports } from "./export.ts";
 import { collectGarbage, readStage } from "./http.ts";
 import { crawlComposerEras, crawlImslp, type ImslpStage } from "./sources/imslp.ts";
 import { crawlMusicBrainz } from "./sources/musicbrainz.ts";
+import { crawlGnd } from "./sources/gnd.ts";
+import { crawlLibris } from "./sources/libris.ts";
+import { crawlMutopia } from "./sources/mutopia.ts";
 import { crawlOpenOpus } from "./sources/openopus.ts";
 import { crawlWikidata, type WikidataStage } from "./sources/wikidata.ts";
 import { crawlWikipedia } from "./sources/wikipedia.ts";
 
-const STAGES = ["imslp", "wikipedia", "wikidata", "openopus", "composers", "musicbrainz", "build"] as const;
+const STAGES = ["imslp", "wikipedia", "wikidata", "openopus", "composers", "musicbrainz", "mutopia", "libris", "gnd", "build"] as const;
 type Stage = (typeof STAGES)[number];
 
 const { values, positionals } = parseArgs({
@@ -55,6 +58,9 @@ const gcNamespaces: Partial<Record<Stage, string>> = {
   wikipedia: "wikipedia",
   wikidata: "wikidata",
   openopus: "openopus",
+  mutopia: "mutopia",
+  libris: "libris",
+  gnd: "gnd",
 };
 const completed: string[] = [];
 
@@ -69,6 +75,9 @@ for (const stage of STAGES) {
     if (stage === "openopus") await crawlOpenOpus();
     if (stage === "composers") await crawlComposerEras(await composerNames());
     if (stage === "musicbrainz") await crawlMusicBrainz({ budget: Number(values["mb-budget"]) });
+    if (stage === "mutopia") await crawlMutopia();
+    if (stage === "libris") await crawlLibris();
+    if (stage === "gnd") await crawlGnd();
     if (stage === "build") {
       const { meta } = await buildDataset();
       await writeExports(DATASET_PATH, meta);

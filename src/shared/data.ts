@@ -4,7 +4,7 @@
 export const ERAS = ["Medieval", "Renaissance", "Baroque", "Classical", "Romantic", "Early 20th century", "Modern"] as const;
 export type Era = (typeof ERAS)[number];
 
-export type SourceId = "imslp" | "wikipedia" | "wikidata" | "openopus" | "musicbrainz";
+export type SourceId = "imslp" | "wikipedia" | "wikidata" | "openopus" | "musicbrainz" | "mutopia" | "libris" | "gnd";
 
 export interface SourceInfo {
   name: string;
@@ -24,6 +24,27 @@ export const SOURCES: Record<SourceId, SourceInfo> = {
   wikidata: { name: "Wikidata", url: "https://www.wikidata.org", license: "CC0", licenseUrl: CC0, role: "Links between sources, dates" },
   openopus: { name: "Open Opus", url: "https://openopus.org", license: "CC0", licenseUrl: CC0, role: "Popular and recommended works" },
   musicbrainz: { name: "MusicBrainz", url: "https://musicbrainz.org", license: "CC0", licenseUrl: CC0, role: "Recording counts" },
+  mutopia: {
+    name: "Mutopia",
+    url: "https://www.mutopiaproject.org",
+    license: "Links only",
+    licenseUrl: "https://www.mutopiaproject.org/legal.html",
+    role: "Free engraved editions",
+  },
+  libris: {
+    name: "LIBRIS",
+    url: "https://libris.kb.se",
+    license: "CC0",
+    licenseUrl: CC0,
+    role: "Sheet music to borrow at Musik- och teaterbiblioteket, Stockholm",
+  },
+  gnd: {
+    name: "GND",
+    url: "https://www.dnb.de/EN/Professionell/Standardisierung/GND/gnd_node.html",
+    license: "CC0",
+    licenseUrl: CC0,
+    role: "Instrumentation, numbers and dates for works, contemporary ones too",
+  },
 };
 
 /** The dataset as a whole (it includes CC BY-SA content). */
@@ -82,6 +103,9 @@ export const PROVIDERS: Record<ProviderId, { name: string; kind: LinkKind }> = {
   wikidata: { name: "Wikidata", kind: "data" },
   musicbrainz: { name: "MusicBrainz", kind: "data" },
   openopus: { name: "Open Opus", kind: "data" },
+  mutopia: { name: "Mutopia", kind: "score" },
+  libris: { name: "Musik- och teaterbiblioteket", kind: "library" },
+  gnd: { name: "German National Library (GND)", kind: "data" },
 };
 
 export interface Link {
@@ -129,7 +153,7 @@ export interface WorkSummary {
   year: number | null;
   era: Era | null;
   score: number;
-  /** Free sheet music (IMSLP), if any */
+  /** Free sheet music, if any (IMSLP preferred) */
   scoreUrl: string | null;
   lineup: string;
   players: number;

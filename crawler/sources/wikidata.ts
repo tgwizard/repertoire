@@ -1,5 +1,6 @@
 // Wikidata (SPARQL): the hub that links IMSLP, Wikipedia and MusicBrainz, plus dates.
 
+import { normalize } from "../../src/shared/text.ts";
 import { WIKIDATA_ENSEMBLES } from "../ensembles.ts";
 import { cached, DAY, fetchJson, readStage, writeStage } from "../http.ts";
 import { resolveTitles, type ImslpStage } from "./imslp.ts";
@@ -28,6 +29,8 @@ const imslpName = (id: string) => id.replace(/^Category:/, "").replaceAll("_", "
 export interface WdComposer {
   qid: string;
   imslp?: string;
+  /** German National Library id (P227) */
+  gnd?: string;
   label?: string;
   born?: number;
   died?: number;
@@ -39,6 +42,8 @@ export interface WdWork {
   qid: string;
   /** IMSLP page title */
   imslp?: string;
+  /** German National Library work id (P227) */
+  gnd?: string;
   label?: string;
   composer?: string; // composer QID
   year?: number;
@@ -61,6 +66,7 @@ function mergeWork(map: Record<string, WdWork>, r: Row) {
   const id = qid(r.w)!;
   const w = (map[id] ??= { qid: id, sitelinks: 0, ensembles: [], instruments: [] });
   if (r.imslp) w.imslp ??= imslpName(r.imslp);
+  if (r.gnd) w.gnd ??= r.gnd;
   if (r.label) w.label ??= r.label;
   if (r.composer) w.composer ??= qid(r.composer);
   const y = year(r.inception) ?? year(r.published);
@@ -81,6 +87,7 @@ const date = (subject: string, prop: string, v: string) =>
 
 const WORK_FIELDS = `
   OPTIONAL { ?w wdt:P839 ?imslp }
+  OPTIONAL { ?w wdt:P227 ?gnd }
   OPTIONAL { ?w rdfs:label ?label FILTER(lang(?label) = "en") }
   OPTIONAL { ?w wdt:P86 ?composer }
   ${date("?w", "P571", "inception")}
@@ -91,9 +98,9 @@ const WORK_FIELDS = `
 
 export async function crawlWikidata(): Promise<void> {
   console.log("Wikidata: composers with IMSLP ids");
-  const composers = await cached("wikidata:composers:v2", 7 * DAY, () =>
-    sparql(`SELECT ?p ?imslp ?label ?born ?died ?sl ?wp WHERE {
-      ?p wdt:P839 ?imslp FILTER(STRSTARTS(?imslp, "Category:")) . ?p wdt:P31 wd:Q5 .
+  const composers = await cached("wikidata:composers:v3", 7 * DAY, () =>
+    sparql(`SELECT ?p ?imslp ?gnd ?label ?born ?died ?sl ?wp WHERE {
+      ?p wdt:P839 ?imslp FILTER(STRSTARTS(?imslp, "Category:")) . ?p wdt:P31 wd:Q5 . OPTIONAL { ?p wdt:P227 ?gnd }
       OPTIONAL { ?p rdfs:label ?label FILTER(lang(?label) = "en") }
       ${date("?p", "P569", "born")} ${date("?p", "P570", "died")}
       OPTIONAL { ?p wikibase:sitelinks ?sl }
@@ -101,15 +108,15 @@ export async function crawlWikidata(): Promise<void> {
   );
 
   console.log("Wikidata: works with IMSLP ids");
-  const imslpWorks = await cached("wikidata:imslp-works:v2", 7 * DAY, () =>
-    sparql(`SELECT ?w ?imslp ?label ?composer ?inception ?published ?mb ?sl ?wp WHERE {
+  const imslpWorks = await cached("wikidata:imslp-works:v3", 7 * DAY, () =>
+    sparql(`SELECT ?w ?imslp ?gnd ?label ?composer ?inception ?published ?mb ?sl ?wp WHERE {
       ?w wdt:P839 ?imslp FILTER(!STRSTARTS(?imslp, "Category:")) . ${WORK_FIELDS} }`),
   );
 
   console.log("Wikidata: works tagged with an ensemble");
   const values = Object.keys(WIKIDATA_ENSEMBLES).map((q) => `wd:${q}`).join(" ");
-  const ensembleWorks = await cached("wikidata:ensemble-works:v3", 7 * DAY, () =>
-    sparql(`SELECT ?w ?g ?inst ?imslp ?label ?composer ?inception ?published ?mb ?sl ?wp WHERE {
+  const ensembleWorks = await cached("wikidata:ensemble-works:v4", 7 * DAY, () =>
+    sparql(`SELECT ?w ?g ?inst ?imslp ?gnd ?label ?composer ?inception ?published ?mb ?sl ?wp WHERE {
       VALUES ?g { ${values} } ?w wdt:P870|wdt:P136|wdt:P31 ?g . ?w wdt:P86 [] .
       OPTIONAL { ?w wdt:P870 ?inst } ${WORK_FIELDS} }`),
   );
@@ -126,8 +133,8 @@ export async function crawlWikidata(): Promise<void> {
   let oldest = Math.min(composers.fetchedAt, imslpWorks.fetchedAt, ensembleWorks.fetchedAt);
   for (let i = 0; i < missing.length; i += 200) {
     const batch = missing.slice(i, i + 200).sort();
-    const res = await cached(`wikidata:works-by-qid:v2:${batch.join(",")}`, 7 * DAY, () =>
-      sparql(`SELECT ?w ?imslp ?label ?composer ?inception ?published ?mb ?sl ?wp WHERE {
+    const res = await cached(`wikidata:works-by-qid:v3:${batch.join(",")}`, 7 * DAY, () =>
+      sparql(`SELECT ?w ?imslp ?gnd ?label ?composer ?inception ?published ?mb ?sl ?wp WHERE {
         VALUES ?w { ${batch.map((q) => `wd:${q}`).join(" ")} } ${WORK_FIELDS} }`),
     );
     oldest = Math.min(oldest, res.fetchedAt);
@@ -139,8 +146,15 @@ export async function crawlWikidata(): Promise<void> {
   const addComposer = (r: Row) => {
     const id = qid(r.p)!;
     const c = (composerMap[id] ??= { qid: id, sitelinks: 0 });
-    if (r.imslp) c.imslp ??= imslpName(r.imslp);
     if (r.label) c.label ??= r.label;
+    // Some people have several IMSLP categories (sometimes wrongly): prefer the one with
+    // their surname ("Bruckner, Anton", not "Weiß, Johann Baptist").
+    if (r.imslp) {
+      const name = imslpName(r.imslp);
+      const fits = (n: string | undefined) => !!n && !!c.label && normalize(c.label).split(" ").includes(normalize(n.split(",")[0]!).split(" ").at(-1)!);
+      if (!c.imslp || (!fits(c.imslp) && fits(name))) c.imslp = name;
+    }
+    if (r.gnd) c.gnd ??= r.gnd;
     const born = year(r.born);
     const died = year(r.died);
     if (born !== undefined && (c.born === undefined || born < c.born)) c.born = born;
@@ -153,10 +167,10 @@ export async function crawlWikidata(): Promise<void> {
   console.log(`Wikidata: details for ${otherComposers.length} more composers`);
   for (let i = 0; i < otherComposers.length; i += 200) {
     const batch = otherComposers.slice(i, i + 200).sort();
-    const res = await cached(`wikidata:composers-by-qid:v2:${batch.join(",")}`, 7 * DAY, () =>
-      sparql(`SELECT ?p ?imslp ?label ?born ?died ?sl ?wp WHERE {
+    const res = await cached(`wikidata:composers-by-qid:v3:${batch.join(",")}`, 7 * DAY, () =>
+      sparql(`SELECT ?p ?imslp ?gnd ?label ?born ?died ?sl ?wp WHERE {
         VALUES ?p { ${batch.map((q) => `wd:${q}`).join(" ")} }
-        OPTIONAL { ?p wdt:P839 ?imslp } OPTIONAL { ?p rdfs:label ?label FILTER(lang(?label) = "en") }
+        OPTIONAL { ?p wdt:P839 ?imslp } OPTIONAL { ?p wdt:P227 ?gnd } OPTIONAL { ?p rdfs:label ?label FILTER(lang(?label) = "en") }
         ${date("?p", "P569", "born")} ${date("?p", "P570", "died")} OPTIONAL { ?p wikibase:sitelinks ?sl }
         OPTIONAL { ?wp schema:about ?p ; schema:isPartOf <https://en.wikipedia.org/> } }`),
     );

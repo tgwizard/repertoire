@@ -54,8 +54,8 @@ export function WorkList({ works, lineup, showLineup, onComposer, groupByPlayers
             <div className="work-sources">
               {other && <span className="lineup-tag">for {describe(parseEnsembleKey(w.lineup))}</span>}
               {w.scoreUrl ? (
-                <a className="pill pill-imslp" href={w.scoreUrl} target="_blank" rel="noreferrer" title="Free sheet music on IMSLP">
-                  Score on IMSLP
+                <a className="pill pill-imslp" href={w.scoreUrl} target="_blank" rel="noreferrer" title="Free sheet music">
+                  Score on {w.scoreUrl.includes("mutopiaproject.org") ? "Mutopia" : "IMSLP"}
                 </a>
               ) : (
                 <span className="pill pill-missing" title="No free score found, often because it is still in copyright">

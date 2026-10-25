@@ -20,6 +20,12 @@ const USE: Record<SourceId, string> = {
     "The glue between sources: Wikidata items link IMSLP pages, Wikipedia articles and MusicBrainz records, and give composition dates and composers' lifespans. Items tagged with an ensemble add works too.",
   openopus: "A curated list of the main works of the best-known composers, marked popular or recommended, which feeds the ranking. Titles that name a standard ensemble add works.",
   musicbrainz: "How many recordings a work has, a strong sign of an established work. Looked up for the most notable works first, a few hundred per crawl.",
+  gnd:
+    "The German National Library's authority file describes hundreds of thousands of musical works with their exact instrumentation, opus and catalogue numbers, keys and dates, including contemporary works IMSLP can't have. Works we have gain a link and sometimes a line-up; works we didn't have come in when they can't be a duplicate of one we do.",
+  libris:
+    "The Swedish union catalogue. We take the sheet music held by Musik- och teaterbiblioteket in Stockholm, which lends scores and parts (orchestral sets too) across Sweden: works we have get a link to borrow them, and works we didn't have, often Swedish, come in when the library states their instrumentation.",
+  mutopia:
+    "Volunteers' new engravings of public-domain music, free to download. Each piece is linked from the work it belongs to; many are single movements, so Mutopia adds links, not works.",
 };
 
 export function AboutPage() {
@@ -36,8 +42,8 @@ export function AboutPage() {
         <h1>Where this comes from</h1>
         <p>
           Repertoire Finder answers one question: what can <em>this</em> group play? You pick the players you have, and get the works written for
-          exactly that line-up, most established first, with a link to free sheet music when there is some. It combines five open sources into
-          one dataset, rebuilt regularly, and everything is open: the data, the code, and how they fit together.
+          exactly that line-up, most established first, with links to free sheet music and to library copies when there are some. It combines
+          eight open sources into one dataset, rebuilt regularly, and everything is open: the data, the code, and how they fit together.
         </p>
       </header>
 
@@ -132,7 +138,7 @@ export function AboutPage() {
         </dl>
         <p className="muted small">
           “Matched” records add links, dates and ranking signals to a work an earlier source already had; “adds” are works no earlier source had. The order is IMSLP, Wikidata, Wikipedia,
-          Open Opus. “Line-ups it states” counts work–line-up pairs the source vouches for; a pair can have several sources.
+          Open Opus, Mutopia, LIBRIS, GND. “Line-ups it states” counts work–line-up pairs the source vouches for; a pair can have several sources.
         </p>
       </section>
 
@@ -144,9 +150,10 @@ export function AboutPage() {
             count separately and are off unless you ask for them. “Include smaller groups” lists works for any group you can form from your players.
           </li>
           <li>
-            <strong>One work, many sources.</strong> Records are matched first on shared ids (Wikidata links IMSLP pages, Wikipedia articles and
-            MusicBrainz works), then on composer, catalogue number (Op., K., BWV, D., Hob. and two dozen more), key and title. When a match is
-            ambiguous we keep the records apart rather than guess.
+            <strong>One work, many sources.</strong> Records are matched first on shared ids (Wikidata links IMSLP pages, Wikipedia articles,
+            MusicBrainz works and GND records), then on composer (name and life dates), catalogue number (Op., K., BWV, D., Hob. and two dozen
+            more), key and title. When a match is ambiguous we keep the records apart rather than guess, and a new work only comes in when it
+            can't be one we already have.
           </li>
           <li>
             <strong>Sanity checks.</strong> A title naming a group size has to agree with the line-up (Poulenc's Sextet isn't a wind quintet), and
@@ -215,7 +222,7 @@ export function AboutPage() {
         <h2>License and reuse</h2>
         <p>
           The dataset is licensed <a href={DATA_LICENSE.url}>{DATA_LICENSE.name}</a>, because it includes material from IMSLP and Wikipedia under
-          that license; Wikidata, Open Opus and MusicBrainz data is CC0. If you reuse it, credit Repertoire Finder and those sources, and share
+          that license; data from Wikidata, Open Opus, MusicBrainz, LIBRIS and the GND is CC0. Mutopia is only linked to. If you reuse it, credit Repertoire Finder and those sources, and share
           alike. The code is <a href={`${REPO}/blob/main/LICENSE`}>MIT</a>. Sheet music is hosted by IMSLP, under each score's own terms.
         </p>
         {meta && (
@@ -227,18 +234,20 @@ export function AboutPage() {
           </p>
         )}
         <p className="muted small">
-          An independent project, not affiliated with IMSLP, Wikipedia, Wikidata, Open Opus or MusicBrainz, which do the real work of collecting
-          this knowledge.
+          An independent project, not affiliated with any of these sources, which do the real work of collecting this knowledge.
         </p>
       </section>
 
       <section className="detail-section">
         <h2>Known gaps</h2>
         <ul className="prose-list">
-          <li>Works still in copyright are only here when Wikipedia, Wikidata or Open Opus know their exact line-up, so modern repertoire is thin.</li>
+          <li>
+            Works still in copyright are only here when the GND, LIBRIS, Wikipedia, Wikidata or Open Opus know their exact line-up; many
+            contemporary works are, many aren't yet.
+          </li>
           <li>Orchestral works are “symphony orchestra” regardless of size; a chamber orchestra isn't told apart yet.</li>
           <li>A few works appear twice when sources describe them too differently to match safely.</li>
-          <li>Library holdings and publishers aren't linked yet; they're next.</li>
+          <li>Library copies are from one library (Musik- och teaterbiblioteket) so far, and publishers aren't linked yet.</li>
         </ul>
       </section>
 

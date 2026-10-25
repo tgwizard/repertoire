@@ -132,6 +132,40 @@ test("work pages: links, line-ups and sources for well-known works", async () =>
   assert.ok(w.year === 1893 || w.year === 1894, `year ${w.year}`); // composed 1893, published 1894
 });
 
+test("free editions from Mutopia are linked from their works", async () => {
+  const [duets] = (await search("mozart k 487")).works;
+  assert.ok(duets, "Mozart's horn duets not found");
+  const w = await api<WorkDetail>(`/api/works/${duets.id}`);
+  assert.ok(w.links.some((l) => l.provider === "mutopia" && l.url?.startsWith("https://www.mutopiaproject.org/")), "no Mutopia link");
+  const meta = await api<Meta>("/api/meta");
+  assert.ok((meta.sources.mutopia?.matched ?? 0) > 800, `only ${meta.sources.mutopia?.matched} Mutopia pieces matched`);
+});
+
+test("LIBRIS: works we have can be borrowed in Stockholm; Swedish works come in", async () => {
+  const [romberg] = (await search("romberg flute quintets op 41")).works;
+  assert.ok(romberg, "Romberg's flute quintets not found");
+  const w = await api<WorkDetail>(`/api/works/${romberg.id}`);
+  assert.ok(w.links.some((l) => l.provider === "libris" && l.kind === "library"), "no library link");
+  const meta = await api<Meta>("/api/meta");
+  assert.ok((meta.sources.libris?.matched ?? 0) > 8000, `only ${meta.sources.libris?.matched} LIBRIS records matched`);
+  assert.ok((meta.sources.libris?.added ?? 0) > 2000, `only ${meta.sources.libris?.added} works added from LIBRIS`);
+});
+
+test("GND: instrumentation for works IMSLP can't have, without doubling composers", async () => {
+  const { composers, works } = await search("julian anderson quartet");
+  assert.ok(works.some((x) => /^Quartet No\. 1/.test(x.title) && x.lineup === key(STRING_QUARTET)), "Julian Anderson's first quartet missing");
+  const hillborg = (await search("hillborg")).composers.filter((c) => c.name === "Anders Hillborg");
+  assert.equal(hillborg.length, 1, "Hillborg listed more than once");
+  assert.ok(hillborg[0]!.works >= 10);
+  const [debussy] = (await search("debussy string quartet op 10")).works;
+  const d = await api<WorkDetail>(`/api/works/${debussy!.id}`);
+  assert.ok(d.links.some((l) => l.provider === "gnd"), "no GND link on Debussy's quartet");
+  const meta = await api<Meta>("/api/meta");
+  assert.ok((meta.sources.gnd?.matched ?? 0) > 30_000, `only ${meta.sources.gnd?.matched} GND works matched`);
+  assert.ok((meta.sources.gnd?.added ?? 0) > 20_000, `only ${meta.sources.gnd?.added} works added from GND`);
+  void composers;
+});
+
 test("composer pages: life, links and line-ups", async () => {
   const { composers } = await search("johannes brahms");
   assert.equal(composers[0]?.name, "Johannes Brahms");

@@ -33,6 +33,7 @@ const CATALOGUES: [string, RegExp][] = [
   ["mwv", /\bMWV\.?\s*([A-Z]\s*\d{1,3})\b/gi], // Mendelssohn
   ["z", /\bZ\.?\s*(\d{1,3}[a-z]?)\b/g], // Purcell
   ["wq", /\bWq\.?\s*(\d{1,3}[a-z]?)\b/gi], // C. P. E. Bach
+  ["mh", /\bMH\.?\s*(\d{1,3}[a-z]?)\b/g], // Michael Haydn (Perger: MH 461)
 ];
 
 const OPUS = /\bOp(?:us)?\.?\s*(?:posth\.?\s*)?(\d+[a-z]?)(?:\s*,?\s*(?:No|Nr|N°|n°)\.?\s*(\d+[a-z]?))?/gi;
@@ -41,7 +42,26 @@ const OPUS = /\bOp(?:us)?\.?\s*(?:posth\.?\s*)?(\d+[a-z]?)(?:\s*,?\s*(?:No|Nr|N�
  * Catalogue keys in a title: "String Quartet No.1, Op.18 No.1" → {"op:18", "op:18/1"};
  * "Piano Concerto No.20 in D minor, K.466" → {"k:466"}.
  */
-export function catalogueKeys(title: string): Set<string> {
+// Matching compares each record against all of a composer's works, so the parsing of
+// titles is memoized (results are never mutated).
+function memo<T>(fn: (title: string) => T): (title: string) => T {
+  const cache = new Map<string, T>();
+  return (title) => {
+    let v = cache.get(title);
+    if (v === undefined && !cache.has(title)) {
+      v = fn(title);
+      if (cache.size > 2_000_000) cache.clear();
+      cache.set(title, v);
+    }
+    return v as T;
+  };
+}
+
+export const catalogueKeys = memo(catalogueKeysOf);
+export const bareTitle = memo(bareTitleOf);
+export const musicalKey = memo(musicalKeyOf);
+
+function catalogueKeysOf(title: string): Set<string> {
   const keys = new Set<string>();
   for (const m of title.matchAll(OPUS)) {
     const op = m[1]!.toLowerCase();
@@ -68,7 +88,7 @@ export function catalogueKeys(title: string): Set<string> {
 const subKeys = (keys: Set<string>) => [...keys].filter((k) => k.includes("/"));
 
 /** Title without catalogue numbers, keys, punctuation: for exact-title fallback matching. */
-export function bareTitle(title: string): string {
+function bareTitleOf(title: string): string {
   let t = title.replace(/\([^)]*\)/g, " ").replace(OPUS, " ");
   for (const [, re] of CATALOGUES) t = t.replace(re, " ");
   return normalize(t.replace(/\b(?:in\s+)?[A-G](?:[- ](?:flat|sharp))?\s+(?:major|minor)\b/gi, " "))
@@ -79,7 +99,7 @@ export function bareTitle(title: string): string {
 const KEY = /\b([A-G])(?:[- ](flat|sharp))?\s+(major|minor)\b/i;
 
 /** "Prelude in C-sharp minor" → "c sharp minor"; null if no key is named. */
-export function musicalKey(title: string): string | null {
+function musicalKeyOf(title: string): string | null {
   const m = KEY.exec(title);
   return m ? [m[1], m[2], m[3]].filter(Boolean).join(" ").toLowerCase() : null;
 }

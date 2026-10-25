@@ -8,6 +8,11 @@ import { build, NONE, readPrevious, type BuildInput, type BuildResult } from "..
 
 const T = Date.parse("2026-10-01T00:00:00Z");
 
+const libris = (id: string, title: string, uniform: string | null, family: string, given: string, born: number, died: number | null, medium: string[], extent: string) => ({
+  id, title, uniform, composers: [{ family, given, born, died, agent: `agent-${family.toLowerCase()}` }], arranged: false, medium,
+  kssb: [], extent, year: 2001, publisher: "Svensk Musik", shelf: null, collection: false,
+});
+
 const imslpWork = (pageid: number, title: string, era: string | null, recorded = false) => ({ pageid, title, era: era as never, recorded, audio: false });
 
 /**
@@ -58,8 +63,11 @@ export function fixtureInput(later = false): BuildInput {
       composers: {
         Q10: { qid: "Q10", imslp: "Debussy, Claude", label: "Claude Debussy", born: 1862, died: 1918, wikipedia: "Claude Debussy", sitelinks: 120 },
         Q11: { qid: "Q11", imslp: "Brahms, Johannes", label: "Johannes Brahms", born: 1833, died: 1897, wikipedia: "Johannes Brahms", sitelinks: 130 },
-        Q12: { qid: "Q12", imslp: later ? "Barber, Samuel" : undefined, label: "Samuel Barber", born: 1910, died: 1981, wikipedia: "Samuel Barber", sitelinks: 60 },
+        // First "Sam Barber" with no IMSLP link: too different to match "Barber, Samuel" by name.
+        Q12: { qid: "Q12", imslp: later ? "Barber, Samuel" : undefined, label: later ? "Samuel Barber" : "Sam Barber", born: 1910, died: 1981, wikipedia: "Samuel Barber", sitelinks: 60 },
         Q13: { qid: "Q13", imslp: "Poulenc, Francis", label: "Francis Poulenc", born: 1899, died: 1963, sitelinks: 70 },
+        // Wikidata links Haydn to the wrong IMSLP composer (as it once did Bruckner).
+        Q14: { qid: "Q14", imslp: "Weiß, Johann Baptist", label: "Joseph Haydn", born: 1732, died: 1809, sitelinks: 150 },
       },
       works: {
         Q1: { qid: "Q1", imslp: "String Quartet in G minor, Op.10 (Debussy, Claude)", label: "String Quartet", composer: "Q10", year: 1893, musicbrainz: "mb-debussy", wikipedia: "String Quartet (Debussy)", sitelinks: 20, ensembles: [], instruments: [] },
@@ -94,6 +102,32 @@ export function fixtureInput(later = false): BuildInput {
       ],
     },
     musicbrainz: { fetchedAt: T, recordings: { "mb-debussy": { count: 500, at: T } } },
+    gnd: null,
+    libris: {
+      fetchedAt: T,
+      total: 4,
+      records: [
+        // An edition of a work IMSLP has: a link to borrow it.
+        libris("lb115", "Quintett für Klarinette, zwei Violinen, Viola und Violoncello, op. 115", "Kvintett, op. 115", "Brahms", "Johannes", 1833, 1897, ["klarinett, violin (2), viola, violoncell"], "1 part. + 5 st."),
+        // A work IMSLP lacks, by a composer we don't have: both come in.
+        libris("lbkv1", "Kongsgaard variations, for string quartet", "Kongsgaard variations", "Hillborg", "Anders", 1954, null, ["violin (2), viola, violoncell"], "1 part. (20 s.) + 4 st."),
+        // Another edition of it: the same work, a second copy.
+        libris("lbkv2", "Kongsgaard variations", "Kongsgaard variations", "Hillborg", "Anders", 1954, null, ["violin (2), viola, violoncell"], "4 st."),
+        // An arrangement we can't place: skipped.
+        { ...libris("lbarr", "Wind Quintet, arr. for brass", null, "Nobody", "A.", 1900, 1980, ["trumpet (2), horn, trombon, tuba"], "5 st."), arranged: true },
+      ],
+    },
+    mutopia: {
+      fetchedAt: T,
+      pieces: [
+        // A movement of an IMSLP work, by catalogue number.
+        { id: 101, title: "String Quartet (2nd movement)", composer: "C. Debussy", born: 1862, died: 1918, opus: "Op. 10", instrument: "String Quartet", license: "Public Domain" },
+        // A composer we don't have.
+        { id: 102, title: "Minuet", composer: "J. Nobody", born: 1700, died: 1760, opus: "", instrument: "Piano", license: "Public Domain" },
+        // The right surname with other life years is someone else.
+        { id: 103, title: "String Quartet", composer: "X. Debussy", born: 1900, died: 1950, opus: "Op. 10", instrument: "String Quartet", license: "Public Domain" },
+      ],
+    },
   };
 }
 

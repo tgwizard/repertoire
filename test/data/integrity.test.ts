@@ -97,6 +97,10 @@ test("composers: every one has works, and counts match", () => {
   none("SELECT id FROM composers WHERE died < born + 10 OR died - born > 105", "impossible lifespans");
   none("SELECT id FROM composers WHERE trim(name) = '' OR name != trim(name)", "blank or untrimmed names");
   for (const c of all("SELECT id FROM composers")) assert.match(c.id, ID_PATTERN);
+  // One person, several entries: a source's composer that didn't match ours. A few are
+  // namesakes (or unmatchable); more means name matching broke.
+  const twins = all("SELECT name, born, COUNT(*) AS entries FROM composers WHERE born IS NOT NULL GROUP BY name, born HAVING entries > 1");
+  assert.ok(twins.length <= 30, `${twins.length} composers listed twice, e.g. ${twins.slice(0, 5).map((t) => `${t.name} (${t.born})`).join(", ")}`);
 });
 
 test("links: one record per provider id, well-formed, of the provider's kind", () => {
@@ -110,6 +114,9 @@ test("links: one record per provider id, well-formed, of the provider's kind", (
     wikidata: /^https:\/\/www\.wikidata\.org\/wiki\/Q\d+$/,
     musicbrainz: /^https:\/\/musicbrainz\.org\/work\/[0-9a-f-]{36}$/,
     openopus: /^$/,
+    gnd: /^https:\/\/d-nb\.info\/gnd\/[0-9X-]+$/,
+    libris: /^https:\/\/libris\.kb\.se\/[0-9a-z]+$/,
+    mutopia: /^https:\/\/www\.mutopiaproject\.org\/cgibin\/piece-info\.cgi\?id=\d+$/,
   };
   for (const l of all("SELECT provider, kind, url, COUNT(*) AS n FROM links GROUP BY provider, kind, url IS NULL")) {
     assert.ok(l.provider in PROVIDERS, `unknown provider ${l.provider}`);

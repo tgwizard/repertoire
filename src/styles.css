@@ -938,6 +938,14 @@ code {
   margin: 0 0 10px;
 }
 
+.subhead {
+  font: 600 0.72rem/1 var(--sans);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 14px 0 8px;
+}
+
 .link-list {
   list-style: none;
   padding: 0;
@@ -952,6 +960,11 @@ code {
   flex-wrap: wrap;
   gap: 6px 16px;
   margin-top: 12px;
+}
+
+.link-list.big {
+  flex-direction: row;
+  flex-wrap: wrap;
 }
 
 .link-list.big a {

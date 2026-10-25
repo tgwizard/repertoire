@@ -1,4 +1,5 @@
 import { adjust, describe, INSTRUMENTS, scoreOrder, type Ensemble } from "../lib/instrumentation";
+import { Link } from "../lib/router";
 import type { Meta } from "../shared/data";
 
 const fmt = new Intl.NumberFormat("en");
@@ -9,12 +10,12 @@ export function Intro({ meta }: { meta: Meta | null }) {
       <h2>Who's playing?</h2>
       <p>
         Pick a preset or add the players you have, and you'll get the works written for exactly that line-up, most established
-        first, with sheet music from IMSLP where it exists. Or search for a work or composer above.
+        first, with free sheet music and library copies where they exist. Or search for a work or composer above.
       </p>
       {meta && (
         <p className="muted small">
-          {fmt.format(meta.works)} works by {fmt.format(meta.composers)} composers, for {fmt.format(meta.lineups)} line-ups, combined from
-          five open sources (see below).
+          {fmt.format(meta.works)} works by {fmt.format(meta.composers)} composers, combined from {Object.keys(meta.sources).length} open sources
+          (see <Link href="/about">about the data</Link>).
         </p>
       )}
     </div>

@@ -17,6 +17,9 @@ const MIN_GAP_MS: Record<string, number> = {
   "en.wikipedia.org": 100,
   "musicbrainz.org": 1100, // their documented limit is 1 request/second
   "api.openopus.org": 1000,
+  "www.mutopiaproject.org": 1000,
+  "libris.kb.se": 1000,
+  "data.dnb.de": 1000,
 };
 const MAX_ATTEMPTS = 6;
 
@@ -51,7 +54,15 @@ function onHostQueue<T>(host: string, fn: () => Promise<T>): Promise<T> {
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function fetchJson<T>(url: string, opts: { form?: Record<string, string>; accept?: string } = {}): Promise<T> {
+interface FetchOptions {
+  form?: Record<string, string>;
+  accept?: string;
+}
+
+export const fetchJson = <T>(url: string, opts: FetchOptions = {}) => fetchWith(url, opts, (res) => res.json() as Promise<T>);
+export const fetchText = (url: string, opts: FetchOptions = {}) => fetchWith(url, { accept: "*/*", ...opts }, (res) => res.text());
+
+async function fetchWith<T>(url: string, opts: FetchOptions, read: (res: Response) => Promise<T>): Promise<T> {
   const host = new URL(url).host;
   for (let attempt = 1; ; attempt++) {
     let retryAfterMs: number | null = null;
@@ -68,7 +79,7 @@ export async function fetchJson<T>(url: string, opts: { form?: Record<string, st
           if (ra > 0) retryAfterMs = Math.min(ra * 1000, 10 * 60_000);
           throw new HttpError(`${res.status} ${res.statusText} for ${url.slice(0, 160)}`, res.status);
         }
-        return (await res.json()) as T;
+        return await read(res);
       });
     } catch (e) {
       const status = e instanceof HttpError ? e.status : 0;

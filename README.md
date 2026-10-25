@@ -1,6 +1,6 @@
 # Repertoire Finder
 
-Find the repertoire for the group you actually have: pick your instruments, and get the works written for exactly that line-up (or for smaller groups drawn from it), most established first, with sheet music from [IMSLP](https://imslp.org) where it exists. Search works and composers, and every work and composer has its own page.
+Find the repertoire for the group you actually have: pick your instruments, and get the works written for exactly that line-up (or for smaller groups drawn from it), most established first, with free sheet music ([IMSLP](https://imslp.org), Mutopia) and library copies where they exist. Search works and composers, and every work and composer has its own page.
 
 Live at https://repertoire.tgwizard.com. See [/about](https://repertoire.tgwizard.com/about) for where the data comes from, with numbers.
 
@@ -9,7 +9,7 @@ Live at https://repertoire.tgwizard.com. See [/about](https://repertoire.tgwizar
 
 ## In short
 
-A crawler (`crawler/`) combines five open sources (IMSLP, Wikipedia, Wikidata, Open Opus, MusicBrainz) into one SQLite database. Each version is published to R2 as downloads and loaded into its own Cloudflare D1 database. A Worker (`worker/`) serves a JSON API and server-rendered work and composer pages from it, and the React app (`src/`) is static assets.
+A crawler (`crawler/`) combines eight open sources (IMSLP, Wikipedia, Wikidata, Open Opus, MusicBrainz, Mutopia, LIBRIS and the German National Library's GND) into one SQLite database. Each version is published to R2 as downloads and loaded into its own Cloudflare D1 database. A Worker (`worker/`) serves a JSON API and server-rendered work and composer pages from it, and the React app (`src/`) is static assets.
 
 The dataset is [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) (it includes IMSLP and Wikipedia material). The code is MIT (see `LICENSE`).
 

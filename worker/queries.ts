@@ -101,7 +101,7 @@ export function ftsQuery(input: string): string | null {
 
 const SUMMARY = `w.id, w.title, w.year, w.era, w.score, s.lineup, s.players, s.arrangement,
   c.id AS cid, c.name AS cname, c.born AS cborn, c.died AS cdied,
-  (SELECT url FROM links WHERE entity = 'work' AND entity_id = w.id AND kind = 'score' LIMIT 1) AS score_url`;
+  (SELECT url FROM links WHERE entity = 'work' AND entity_id = w.id AND kind = 'score' ORDER BY provider != 'imslp' LIMIT 1) AS score_url`;
 const FROM = "FROM scorings s JOIN works w ON w.id = s.work_id LEFT JOIN composers c ON c.id = w.composer_id";
 
 function toSummary(r: Row): WorkSummary {
