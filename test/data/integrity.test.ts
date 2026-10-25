@@ -58,6 +58,7 @@ test("line-ups: canonical keys, counts and descriptions that match", () => {
     const e = parseEnsembleKey(l.key);
     assert.equal(ensembleKey(e), l.key, `non-canonical key ${l.key}`);
     assert.ok(!("player" in e), `aggregate line-up ${l.key}`); // IMSLP's "For 4 players"
+    assert.equal(l.key, l.key.toLowerCase(), `instrument ids are lowercase: ${l.key}`);
     assert.equal(l.players, playerCount(e), l.key);
     assert.equal(l.description, describe(e), l.key);
     const c = counted.get(l.key);

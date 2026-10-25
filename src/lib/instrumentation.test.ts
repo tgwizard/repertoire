@@ -12,7 +12,7 @@ test("parses counts and plurals", () => {
     arr: true,
   });
   assert.deepEqual(parseCategory("For 2 pianos 8 hands")?.parts, { "piano 8 hands": 2 });
-  assert.deepEqual(parseCategory("For 2 English horns, 2 chalumeaux")?.parts, { "English horn": 2, chalumeau: 2 });
+  assert.deepEqual(parseCategory("For 2 English horns, 2 chalumeaux")?.parts, { "english horn": 2, chalumeau: 2 });
 });
 
 test("legacy '(2)' counts merge with the canonical form", () => {
@@ -61,4 +61,9 @@ test("url round trip", () => {
 test("describe pluralizes labels", () => {
   assert.equal(describe({ violin: 2, viola: 1, cello: 1 }), "2 violins, viola, cello");
   assert.equal(describe({ "double bass": 2, bass: 2, timpani: 2 }), "2 double basses, 2 timpani, 2 basses (voice)");
+});
+
+test("instrument ids are lowercase, and old links with capitals still work", () => {
+  assert.deepEqual(parseCategory("For Wagner tuba, piano")?.parts, { "wagner tuba": 1, piano: 1 });
+  assert.deepEqual(decodeEnsemble("English horn,oboe:2"), { "english horn": 1, oboe: 2 });
 });

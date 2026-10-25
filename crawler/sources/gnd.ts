@@ -199,7 +199,7 @@ const GERMAN: Record<string, string | Parts> = {
   Laute: "lute", Mandoline: "mandolin", Mandola: "mandola", Zither: "zither",
   Querflöte: "flute", Flöte: "flute", Pikkoloflöte: "piccolo", Altquerflöte: "alto flute", Bassquerflöte: "bass flute",
   Blockflöte: "recorder", Sopranblockflöte: "recorder", Altblockflöte: "recorder", Tenorblockflöte: "recorder", Bassblockflöte: "recorder",
-  Oboe: "oboe", "Oboe d'Amore": "oboe damore", Englischhorn: "English horn", Klarinette: "clarinet", Bassklarinette: "bass clarinet",
+  Oboe: "oboe", "Oboe d'Amore": "oboe damore", Englischhorn: "english horn", Klarinette: "clarinet", Bassklarinette: "bass clarinet",
   Bassetthorn: "basset horn", Fagott: "bassoon", Kontrafagott: "contrabassoon", Saxofon: "saxophone", Sopransaxofon: "soprano saxophone",
   Altsaxofon: "alto saxophone", Tenorsaxofon: "tenor saxophone", Baritonsaxofon: "baritone saxophone",
   Horn: "horn", Trompete: "trumpet", Kornett: "cornet", Flügelhorn: "flugelhorn", Posaune: "trombone", Bassposaune: "bass trombone",

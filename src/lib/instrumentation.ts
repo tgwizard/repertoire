@@ -21,7 +21,8 @@ function isGeneric(part: string): boolean {
 }
 
 function normalizeName(name: string, plural: boolean): string {
-  let n = name.trim().replace(/^english /, "English ");
+  // Instrument ids are lowercase, proper names included ("english horn", "wagner tuba").
+  let n = name.trim().toLowerCase();
   if (plural && !isGeneric(n)) n = n.split(" ").map(singularWord).join(" ");
   return n;
 }
@@ -123,7 +124,7 @@ const P: [Family, string, string?][] = [
   ["woodwinds", "recorder"],
   ["woodwinds", "oboe"],
   ["woodwinds", "oboe damore", "oboe d'amore"],
-  ["woodwinds", "English horn"],
+  ["woodwinds", "english horn"],
   ["woodwinds", "clarinet"],
   ["woodwinds", "basset horn"],
   ["woodwinds", "bass clarinet"],
@@ -255,7 +256,8 @@ export function decodeEnsemble(s: string | null): Ensemble {
   for (const tok of (s ?? "").split(",")) {
     const m = /^(.+?)(?::(\d+))?$/.exec(tok.trim());
     if (!m || !m[1]) continue;
-    e[m[1]] = Math.max(1, Math.min(99, Number(m[2] ?? 1)));
+    // Ids are lowercase; links from before that may say "English horn".
+    e[m[1].toLowerCase()] = Math.max(1, Math.min(99, Number(m[2] ?? 1)));
   }
   return e;
 }

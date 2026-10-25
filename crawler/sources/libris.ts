@@ -108,7 +108,7 @@ export function extractRecord(item: any): LibrisRecord | null {
 // Instruments as LIBRIS names them (Swedish), → our instrument ids.
 const SWEDISH: Record<string, string> = {
   flöjt: "flute", tvärflöjt: "flute", piccolaflöjt: "piccolo", piccola: "piccolo", altflöjt: "alto flute", blockflöjt: "recorder",
-  oboe: "oboe", "oboe d'amore": "oboe damore", "engelskt horn": "English horn", klarinett: "clarinet", bassetthorn: "basset horn",
+  oboe: "oboe", "oboe d'amore": "oboe damore", "engelskt horn": "english horn", klarinett: "clarinet", bassetthorn: "basset horn",
   basklarinett: "bass clarinet", fagott: "bassoon", kontrafagott: "contrabassoon", sopransaxofon: "soprano saxophone",
   altsaxofon: "alto saxophone", tenorsaxofon: "tenor saxophone", barytonsaxofon: "baritone saxophone", saxofon: "saxophone",
   horn: "horn", valthorn: "horn", trumpet: "trumpet", kornett: "cornet", flygelhorn: "flugelhorn", trombon: "trombone",
