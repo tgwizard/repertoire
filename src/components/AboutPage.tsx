@@ -22,6 +22,8 @@ const USE: Record<SourceId, string> = {
   musicbrainz: "How many recordings a work has, a strong sign of an established work. Looked up for the most notable works first, a few hundred per crawl.",
   gnd:
     "The German National Library's authority file describes hundreds of thousands of musical works with their exact instrumentation, opus and catalogue numbers, keys and dates, including contemporary works IMSLP can't have. Works we have gain a link and sometimes a line-up; works we didn't have come in when they can't be a duplicate of one we do.",
+  rism:
+    "The International Inventory of Musical Sources catalogues manuscripts and early prints in libraries worldwide. For works we have, it shows where copies are kept (the composer's own hand first), and how many libraries hold one, which says how widely a work was played before recordings.",
   libris:
     "The Swedish union catalogue. We take the sheet music held by Musik- och teaterbiblioteket in Stockholm, which lends scores and parts (orchestral sets too) across Sweden: works we have get a link to borrow them, and works we didn't have, often Swedish, come in when the library states their instrumentation.",
   mutopia:
@@ -43,7 +45,7 @@ export function AboutPage() {
         <p>
           Repertoire Finder answers one question: what can <em>this</em> group play? You pick the players you have, and get the works written for
           exactly that line-up, most established first, with links to free sheet music and to library copies when there are some. It combines
-          eight open sources into one dataset, rebuilt regularly, and everything is open: the data, the code, and how they fit together.
+          nine open sources into one dataset, rebuilt regularly, and everything is open: the data, the code, and how they fit together.
         </p>
       </header>
 
@@ -138,7 +140,7 @@ export function AboutPage() {
         </dl>
         <p className="muted small">
           “Matched” records add links, dates and ranking signals to a work an earlier source already had; “adds” are works no earlier source had. The order is IMSLP, Wikidata, Wikipedia,
-          Open Opus, Mutopia, LIBRIS, GND. “Line-ups it states” counts work–line-up pairs the source vouches for; a pair can have several sources.
+          Open Opus, Mutopia, LIBRIS, GND, RISM. “Line-ups it states” counts work–line-up pairs the source vouches for; a pair can have several sources.
         </p>
       </section>
 
@@ -164,7 +166,8 @@ export function AboutPage() {
             {Object.values(SIGNALS)
               .map((sig) => `${sig.label.charAt(0).toLowerCase()}${sig.label.slice(1)} (+${sig.points})`)
               .join(", ")}
-            , plus recordings on MusicBrainz and how many Wikipedias cover the work and its composer. {CORE_SCORE} points or more counts as core
+            , plus recordings on MusicBrainz, how many libraries hold copies (RISM, LIBRIS; it shows what was played before
+            recordings), and how many Wikipedias cover the work and its composer. {CORE_SCORE} points or more counts as core
             repertoire. Each work's page shows its breakdown.
           </li>
           <li>
@@ -222,7 +225,8 @@ export function AboutPage() {
         <h2>License and reuse</h2>
         <p>
           The dataset is licensed <a href={DATA_LICENSE.url}>{DATA_LICENSE.name}</a>, because it includes material from IMSLP and Wikipedia under
-          that license; data from Wikidata, Open Opus, MusicBrainz, LIBRIS and the GND is CC0. Mutopia is only linked to. If you reuse it, credit Repertoire Finder and those sources, and share
+          that license; RISM's is CC BY 3.0, and data from Wikidata, Open Opus, MusicBrainz, LIBRIS and the GND is CC0. Mutopia is only
+          linked to. If you reuse it, credit Repertoire Finder and those sources, and share
           alike. The code is <a href={`${REPO}/blob/main/LICENSE`}>MIT</a>. Sheet music is hosted by IMSLP, under each score's own terms.
         </p>
         {meta && (
@@ -249,7 +253,10 @@ export function AboutPage() {
             Orchestral works are “symphony orchestra” unless a source says “chamber orchestra”; most sources don't describe an orchestra's size.
           </li>
           <li>A few works appear twice when sources describe them too differently to match safely.</li>
-          <li>Library copies are from one library (Musik- och teaterbiblioteket) so far, and publishers aren't linked yet.</li>
+          <li>
+            Library copies come from RISM (mostly music before 1850) and one lending library, Musik- och teaterbiblioteket; publishers aren't
+            linked yet.
+          </li>
         </ul>
       </section>
 

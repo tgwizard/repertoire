@@ -38,6 +38,7 @@ import type { MusicBrainzStage } from "./sources/musicbrainz.ts";
 import { mutopiaUrl, type MutopiaStage } from "./sources/mutopia.ts";
 import { librisHolding, librisLineup, librisUrl, type LibrisStage } from "./sources/libris.ts";
 import { gndLineup, gndMatchTitle, gndTitle, gndUrl, type GndStage } from "./sources/gnd.ts";
+import { rismMatchTitle, rismPersonUrl, rismRank, rismUrl, type RismStage } from "./sources/rism.ts";
 import type { OpenOpusStage } from "./sources/openopus.ts";
 import type { WdWork, WikidataStage } from "./sources/wikidata.ts";
 import type { WikipediaStage } from "./sources/wikipedia.ts";
@@ -58,6 +59,7 @@ export interface BuildInput {
   mutopia: MutopiaStage | null;
   libris: LibrisStage | null;
   gnd: GndStage | null;
+  rism: RismStage | null;
 }
 
 export async function loadInput(): Promise<BuildInput> {
@@ -73,6 +75,7 @@ export async function loadInput(): Promise<BuildInput> {
     mutopia: await readStage<MutopiaStage>("mutopia"),
     libris: await readStage<LibrisStage>("libris"),
     gnd: await readStage<GndStage>("gnd"),
+    rism: await readStage<RismStage>("rism"),
   };
 }
 
@@ -107,6 +110,8 @@ interface BuildWork {
   sitelinks: number;
   signals: Set<Signal>;
   ensembles: Map<string, Membership>;
+  /** Libraries holding a copy (RISM sigla; LIBRIS counts as Musik- och teaterbiblioteket) */
+  libraries: Set<string>;
   /** Links from sources that only point at the work (Mutopia editions…) */
   extraLinks: { provider: ProviderId; ref: string; url: string | null; label: string | null; source: SourceId }[];
 }
@@ -127,6 +132,8 @@ interface BuildComposer {
   libris?: string;
   /** German National Library person id */
   gnd?: string;
+  /** RISM person id */
+  rism?: string;
   sitelinks: number;
 }
 
@@ -205,14 +212,14 @@ export const NONE: Previous = { work: NO_PREVIOUS, composer: NO_PREVIOUS };
 
 /** Merges the sources into a new database at `out`, keeping ids from `previous`. */
 export function build(input: BuildInput, out: string, previous: Previous, builtAt = new Date()): BuildResult {
-  const { imslp, eras, wikipedia: wiki, wikidata: wd, openopus: oo, musicbrainz: mb, mutopia, libris, gnd } = input;
+  const { imslp, eras, wikipedia: wiki, wikidata: wd, openopus: oo, musicbrainz: mb, mutopia, libris, gnd, rism } = input;
   const works = new Map<string, BuildWork>();
   const composers = new Map<string, BuildComposer>();
   const byComposer = new Map<string, BuildWork[]>();
   const imslpByTitle = new Map<string, BuildWork>();
   const lineupSources = new Map<string, Map<SourceId, Set<string>>>();
   const stats = {
-    matched: { wikidata: 0, wikipedia: 0, openopus: 0, mutopia: 0, libris: 0, gnd: 0 },
+    matched: { wikidata: 0, wikipedia: 0, openopus: 0, mutopia: 0, libris: 0, gnd: 0, rism: 0 },
     added: { wikipedia: 0, wikidata: 0, openopus: 0, libris: 0, gnd: 0 },
   };
 
@@ -242,6 +249,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     sitelinks: 0,
     signals: new Set(),
     ensembles: new Map(),
+    libraries: new Set(),
     extraLinks: [],
   });
 
@@ -523,6 +531,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
       stats.added.libris++;
     }
     w.extraLinks.push({ provider: "libris", ref: r.id, url: librisUrl(r.id), label: librisHolding(r), source: "libris" });
+    w.libraries.add("S-Skma"); // Musik- och teaterbiblioteket's RISM siglum
   }
 
   // ---- 9. GND -------------------------------------------------------------------
@@ -586,6 +595,48 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     stats.added.gnd++;
   }
 
+  // ---- 10. RISM ------------------------------------------------------------------
+  // Manuscripts and early prints of works we have, and the libraries holding them. No
+  // new works: most sources are copies, parts or fragments, and the works RISM alone
+  // knows are mostly anonymous or obscure. Matching goes through catalogue numbers, so
+  // only works sharing a number (or a title) with the source are compared.
+  const candidates = new Map<string, BuildWork[]>();
+  const index = (key: string, w: BuildWork) => candidates.set(key, [...(candidates.get(key) ?? []), w]);
+  for (const w of works.values()) {
+    if (!w.composer) continue;
+    for (const k of catalogueKeys(w.title)) index(`${w.composer}|${k}`, w);
+    index(`${w.composer}|=${bareTitle(w.title)}`, w);
+  }
+  const best = new Map<BuildWork, { id: string; rank: number; label: string }[]>();
+  for (const src of rism?.sources ?? []) {
+    const person = rism!.people[src.person];
+    const composerKey = (person?.wikidata && composerKeyByQid.get(person.wikidata)) || (person?.gnd && composerByGnd.get(person.gnd)) || undefined;
+    if (!composerKey || !composers.has(composerKey)) continue;
+    const title = rismMatchTitle(src);
+    const pool = new Set<BuildWork>();
+    for (const k of catalogueKeys(title)) for (const w of candidates.get(`${composerKey}|${k}`) ?? []) pool.add(w);
+    for (const w of candidates.get(`${composerKey}|=${bareTitle(title)}`) ?? []) pool.add(w);
+    if (!pool.size) continue;
+    const w = matchWork(title, [...pool]);
+    if (!w) continue;
+    stats.matched.rism++;
+    composers.get(composerKey)!.rism ??= src.person;
+    for (const h of src.holdings) w.libraries.add(h.siglum);
+    const h = src.holdings[0]!;
+    const library = rism!.libraries[h.siglum];
+    const shelf = h.shelf && !/^\[.*\]$/.test(h.shelf) ? h.shelf : null; // not "[no indication]"
+    const label = [src.type, library ? `${library} (${h.siglum})` : h.siglum, shelf].filter(Boolean).join(" · ");
+    const list = best.get(w) ?? [];
+    list.push({ id: src.id, rank: rismRank(src.type) + (src.excerpt ? 0.5 : 0), label });
+    best.set(w, list);
+  }
+  // A few copies per work: the composer's own hand first, then prints.
+  for (const [w, list] of best) {
+    for (const s of list.sort((a, b) => a.rank - b.rank || Number(a.id) - Number(b.id)).slice(0, 3)) {
+      w.extraLinks.push({ provider: "rism", ref: s.id, url: rismUrl(s.id), label: s.label, source: "rism" });
+    }
+  }
+
   // ---- Composer eras ----------------------------------------------------------
   for (const c of composers.values()) {
     // Contradictory dates (a death before birth, a 120-year life) are wrong somewhere: keep neither.
@@ -621,9 +672,9 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
   db.exec("BEGIN");
 
   const insertComposer = db.prepare("INSERT INTO composers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-  const insertWork = db.prepare("INSERT INTO works VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+  const insertWork = db.prepare("INSERT INTO works VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
   const insertScoring = db.prepare("INSERT INTO scorings VALUES (?, ?, ?, ?, ?, ?)");
-  const insertLink = db.prepare("INSERT INTO links VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+  const insertLink = db.prepare("INSERT INTO links VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
   const insertLineup = db.prepare("INSERT INTO lineups VALUES (?, ?, ?, ?, ?, ?)");
   const insertRedirect = db.prepare("INSERT INTO redirects VALUES (?, ?, ?)");
   const insertWorkFts = db.prepare("INSERT INTO works_fts (rowid, title, composer, aliases, keys) VALUES (?, ?, ?, ?, ?)");
@@ -634,12 +685,12 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
   // first, in id order, keeps it.
   const linked = new Set<string>();
   let sharedLinks = 0;
-  const link = (entity: "work" | "composer", id: string, provider: ProviderId, ref: string, url: string | null, source: SourceId, label: string | null = null) => {
+  const link = (entity: "work" | "composer", id: string, provider: ProviderId, ref: string, url: string | null, source: SourceId, label: string | null = null, position = 0) => {
     const k = `${entity}|${provider}|${ref}`;
     if (linked.has(k)) return void sharedLinks++;
     linked.add(k);
     const l: Link = { provider, kind: PROVIDERS[provider].kind, ref, url, label, source };
-    insertLink.run(entity, id, l.provider, l.kind, l.ref, l.url, l.label, l.source);
+    insertLink.run(entity, id, l.provider, l.kind, l.ref, l.url, l.label, l.source, position);
   };
 
   const worksPerComposer = new Map<string, number>();
@@ -655,6 +706,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     if (c.wikipedia) link("composer", id, "wikipedia", c.wikipedia, wikipediaUrl(c.wikipedia), "wikidata");
     if (c.libris) link("composer", id, "libris", c.libris, librisUrl(c.libris), "libris");
     if (c.gnd) link("composer", id, "gnd", c.gnd, gndUrl(c.gnd), "wikidata");
+    if (c.rism) link("composer", id, "rism", c.rism, rismPersonUrl(c.rism), "rism");
   });
 
   const lineupCounts = new Map<string, { original: number; arrangements: number }>();
@@ -663,7 +715,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     const id = workIds.ids[i]!;
     const n = i + 1;
     const c = w.composer ? composers.get(w.composer) : undefined;
-    const s = score({ signals: [...w.signals], recordings: w.recordings, sitelinks: w.sitelinks, composerSitelinks: c?.sitelinks });
+    const s = score({ signals: [...w.signals], recordings: w.recordings, sitelinks: w.sitelinks, composerSitelinks: c?.sitelinks, copies: w.libraries.size });
     if (s >= CORE_SCORE) core++;
     // Wikidata publication dates are often a modern edition's: keep years within the composer's life (roughly).
     const plausible =
@@ -691,6 +743,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
       w.imslp || w.extraLinks.some((l) => PROVIDERS[l.provider].kind === "score") ? 1 : 0,
       memberships[0]![0],
       memberships.length,
+      w.libraries.size,
     );
     for (const [key, m] of memberships) {
       insertScoring.run(id, key, m.arr ? 1 : 0, players(key), s, JSON.stringify([...m.refs].map(([source, ref]) => ({ source, ref }))));
@@ -710,7 +763,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     }
     // Open Opus has no page per work; the id still records the match.
     if (w.openopus) link("work", id, "openopus", w.openopus, null, "openopus");
-    for (const l of w.extraLinks) link("work", id, l.provider, l.ref, l.url, l.source, l.label);
+    w.extraLinks.forEach((l, i) => link("work", id, l.provider, l.ref, l.url, l.source, l.label, i));
 
     // Folded to ASCII words, like search queries (see worker/queries.ts); keys add the
     // compact catalogue forms people type ("k581", "bwv1007", "op18").
@@ -784,6 +837,13 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
         matched: stats.matched.gnd,
         added: stats.added.gnd,
         note: "musical works with instrumentation or a Wikidata link",
+      },
+      rism: {
+        fetchedAt: iso(rism?.fetchedAt),
+        items: rism?.sources.length ?? 0,
+        matched: stats.matched.rism,
+        added: null,
+        note: "manuscripts and prints held by libraries, by composers we can identify",
       },
       musicbrainz: {
         fetchedAt: iso(mb?.fetchedAt),

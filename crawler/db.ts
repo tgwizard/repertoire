@@ -2,7 +2,7 @@
 // published as the SQLite download and loaded into Cloudflare D1, which the Worker
 // queries. Comments here are the documentation of the downloads too.
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const TABLES = `
 -- Dataset version, build time, counts, schema version and stats (JSON)
@@ -49,7 +49,8 @@ CREATE TABLE works (
   sitelinks INTEGER NOT NULL,
   free INTEGER NOT NULL,              -- 1 if sheet music is free to download (IMSLP)
   lineup TEXT NOT NULL,               -- its main line-up (the first original one)
-  lineups INTEGER NOT NULL            -- number of line-ups it is listed for
+  lineups INTEGER NOT NULL,           -- number of line-ups it is listed for
+  copies INTEGER NOT NULL             -- libraries known to hold a copy (RISM, LIBRIS)
 );
 
 -- Line-ups: a key lists instrument ids, sorted, with "*N" for several players
@@ -84,6 +85,7 @@ CREATE TABLE links (
   url TEXT,
   label TEXT,
   source TEXT NOT NULL,               -- the source we got the link from
+  position INTEGER NOT NULL,          -- order among a provider's links for one entity (best first)
   PRIMARY KEY (entity, entity_id, provider, ref)
 ) WITHOUT ROWID;
 

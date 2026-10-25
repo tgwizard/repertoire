@@ -83,7 +83,7 @@ test("works: ids, titles, years, eras, signals and scores as the rules say", () 
       problems.push(`${w.id}: year ${w.year} for a composer ${c?.born}–${c?.died}`);
     const signals = JSON.parse(w.signals) as Signal[];
     if (signals.some((s) => !(s in SIGNALS))) problems.push(`${w.id}: signals ${w.signals}`);
-    const expected = score({ signals, recordings: w.recordings, sitelinks: w.sitelinks, composerSitelinks: c?.sitelinks });
+    const expected = score({ signals, recordings: w.recordings, sitelinks: w.sitelinks, composerSitelinks: c?.sitelinks, copies: w.copies });
     if (Math.abs(expected - w.score) > 0.001) problems.push(`${w.id}: score ${w.score}, expected ${expected}`);
     const aliases = JSON.parse(w.aliases) as string[];
     if (aliases.includes(w.title)) problems.push(`${w.id}: alias repeats the title`);
@@ -116,6 +116,7 @@ test("links: one record per provider id, well-formed, of the provider's kind", (
     musicbrainz: /^https:\/\/musicbrainz\.org\/work\/[0-9a-f-]{36}$/,
     openopus: /^$/,
     gnd: /^https:\/\/d-nb\.info\/gnd\/[0-9X-]+$/,
+    rism: /^https:\/\/rism\.online\/(sources|people)\/\d+$/,
     libris: /^https:\/\/libris\.kb\.se\/[0-9a-z]+$/,
     mutopia: /^https:\/\/www\.mutopiaproject\.org\/cgibin\/piece-info\.cgi\?id=\d+$/,
   };

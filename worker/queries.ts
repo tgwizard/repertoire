@@ -236,7 +236,7 @@ export async function getWork(db: Db, id: string): Promise<Found<WorkDetail>> {
     db
       .prepare("SELECT s.lineup, s.arrangement, s.players, s.sources, l.description FROM scorings s JOIN lineups l ON l.key = s.lineup WHERE s.work_id = ? ORDER BY s.arrangement, s.players, s.lineup")
       .bind(id),
-    db.prepare("SELECT * FROM links WHERE entity = 'work' AND entity_id = ? ORDER BY kind DESC, provider").bind(id),
+    db.prepare("SELECT * FROM links WHERE entity = 'work' AND entity_id = ? ORDER BY kind DESC, provider, position").bind(id),
   ]);
   const w = work!.results[0];
   if (!w) return redirectFor(db, "work", id);
@@ -250,10 +250,11 @@ export async function getWork(db: Db, id: string): Promise<Found<WorkDetail>> {
       year: w.year,
       era: w.era,
       score: w.score,
-      scoreParts: scoreParts({ signals, recordings: w.recordings, sitelinks: w.sitelinks, composerSitelinks: w.csitelinks }).map((p) => ({
+      scoreParts: scoreParts({ signals, recordings: w.recordings, sitelinks: w.sitelinks, composerSitelinks: w.csitelinks, copies: w.copies }).map((p) => ({
         label: p.label,
         points: Math.round(p.points * 10) / 10,
       })),
+      copies: w.copies,
       scorings: scorings!.results.map(
         (s): Scoring => ({ lineup: s.lineup, description: s.description, players: s.players, arrangement: !!s.arrangement, sources: JSON.parse(s.sources) }),
       ),
@@ -265,7 +266,7 @@ export async function getWork(db: Db, id: string): Promise<Found<WorkDetail>> {
 export async function getComposer(db: Db, id: string): Promise<Found<ComposerDetail>> {
   const [composer, links, lineups] = await db.batch<Row>([
     db.prepare("SELECT * FROM composers WHERE id = ?").bind(id),
-    db.prepare("SELECT * FROM links WHERE entity = 'composer' AND entity_id = ? ORDER BY kind DESC, provider").bind(id),
+    db.prepare("SELECT * FROM links WHERE entity = 'composer' AND entity_id = ? ORDER BY kind DESC, provider, position").bind(id),
     db
       .prepare(
         `SELECT s.lineup AS key, l.description AS description, COUNT(*) AS n FROM works w JOIN scorings s ON s.work_id = w.id JOIN lineups l ON l.key = s.lineup

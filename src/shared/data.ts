@@ -4,7 +4,7 @@
 export const ERAS = ["Medieval", "Renaissance", "Baroque", "Classical", "Romantic", "Early 20th century", "Modern"] as const;
 export type Era = (typeof ERAS)[number];
 
-export type SourceId = "imslp" | "wikipedia" | "wikidata" | "openopus" | "musicbrainz" | "mutopia" | "libris" | "gnd";
+export type SourceId = "imslp" | "wikipedia" | "wikidata" | "openopus" | "musicbrainz" | "mutopia" | "libris" | "gnd" | "rism";
 
 export interface SourceInfo {
   name: string;
@@ -45,6 +45,13 @@ export const SOURCES: Record<SourceId, SourceInfo> = {
     licenseUrl: CC0,
     role: "Instrumentation, numbers and dates for works, contemporary ones too",
   },
+  rism: {
+    name: "RISM",
+    url: "https://rism.online",
+    license: "CC BY 3.0",
+    licenseUrl: "https://creativecommons.org/licenses/by/3.0/",
+    role: "Manuscripts and early prints, and the libraries that hold them",
+  },
 };
 
 /** The dataset as a whole (it includes CC BY-SA content). */
@@ -74,6 +81,8 @@ export interface ScoreInput {
   sitelinks?: number | null;
   /** The same, for the composer */
   composerSitelinks?: number | null;
+  /** Libraries holding a copy (RISM, LIBRIS) */
+  copies?: number | null;
 }
 
 /** The ranking score, broken down into its parts (largest first). */
@@ -81,6 +90,7 @@ export function scoreParts(w: ScoreInput): { label: string; points: number }[] {
   const parts: { label: string; points: number }[] = w.signals.map((s) => ({ label: SIGNALS[s].label, points: SIGNALS[s].points }));
   if (w.recordings) parts.push({ label: `${w.recordings} recordings on MusicBrainz`, points: Math.min(4, Math.log2(1 + w.recordings) / 2) });
   if (w.sitelinks) parts.push({ label: `Articles in ${w.sitelinks} Wikipedias`, points: Math.min(2, w.sitelinks / 10) });
+  if (w.copies) parts.push({ label: `Copies in ${w.copies} ${w.copies === 1 ? "library" : "libraries"} (RISM, LIBRIS)`, points: Math.min(2, Math.log2(1 + w.copies) / 2.5) });
   if (w.composerSitelinks) parts.push({ label: "Composer's notability (Wikipedia articles)", points: Math.min(1.5, Math.log2(1 + w.composerSitelinks) / 5) });
   return parts.sort((a, b) => b.points - a.points);
 }
@@ -106,6 +116,7 @@ export const PROVIDERS: Record<ProviderId, { name: string; kind: LinkKind }> = {
   mutopia: { name: "Mutopia", kind: "score" },
   libris: { name: "Musik- och teaterbiblioteket", kind: "library" },
   gnd: { name: "German National Library (GND)", kind: "data" },
+  rism: { name: "RISM", kind: "library" },
 };
 
 export interface Link {
@@ -179,6 +190,8 @@ export interface WorkDetail {
   era: Era | null;
   score: number;
   scoreParts: { label: string; points: number }[];
+  /** Libraries known to hold a copy (RISM, LIBRIS) */
+  copies: number;
   scorings: Scoring[];
   links: Link[];
 }

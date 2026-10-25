@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { composerPath, finderPath, lifespan, useApi, type WorkDetail, type WorksPage } from "../lib/api";
+import { composerPath, finderPath, lifespan, useApi, type ComposerDetail, type WorkDetail, type WorksPage } from "../lib/api";
 import { Link } from "../lib/router";
 import { CORE_SCORE, lineupSourceUrl, PROVIDERS, SOURCES, type Link as WorkLink } from "../shared/data";
 import { WorkList } from "./WorkList";
@@ -12,7 +12,9 @@ function LinkItem({ l }: { l: WorkLink }) {
     l.provider === "imslp"
       ? "Sheet music on IMSLP"
       : l.provider === "libris"
-        ? `Musik- och teaterbiblioteket, Stockholm${l.label ? `: ${l.label}` : ""}`
+        ? `Borrow from Musik- och teaterbiblioteket, Stockholm${l.label ? `: ${l.label}` : ""}`
+        : l.provider === "rism"
+          ? l.label ?? "A source in RISM"
         : l.provider === "mutopia"
           ? `Engraved edition on Mutopia${l.label ? `: ${l.label}` : ""}`
           : l.provider === "musicbrainz" && l.label
@@ -34,6 +36,7 @@ function LinkItem({ l }: { l: WorkLink }) {
 export function WorkPage({ id }: { id: string }) {
   const { data: w, error, loading } = useApi<WorkDetail>(`/api/works/${id}`);
   const main = w?.scorings.find((s) => !s.arrangement) ?? w?.scorings[0];
+  const composer = useApi<ComposerDetail>(w?.composer && w.copies > 0 ? `/api/composers/${w.composer.id}` : null);
   const more = useApi<WorksPage>(w?.composer && main ? `/api/works?composer=${w.composer.id}&lineup=${encodeURIComponent(main.lineup)}&limit=6` : null);
 
   useEffect(() => {
@@ -53,6 +56,7 @@ export function WorkPage({ id }: { id: string }) {
   const libraries = w.links.filter((l) => l.kind === "library");
   const elsewhere = w.links.filter((l) => l.kind === "reference" || l.kind === "data");
   const others = (more.data?.works ?? []).filter((o) => o.id !== w.id).slice(0, 5);
+  const rismPerson = composer.data?.links.find((l) => l.provider === "rism")?.url;
 
   return (
     <article className="page-detail">
@@ -87,12 +91,24 @@ export function WorkPage({ id }: { id: string }) {
         )}
         {libraries.length > 0 && (
           <>
-            <h3 className="subhead">Borrow</h3>
+            <h3 className="subhead">In libraries</h3>
             <ul className="link-list">
               {libraries.map((l) => (
                 <LinkItem key={l.provider + l.ref} l={l} />
               ))}
             </ul>
+            {w.copies > libraries.length && (
+              <p className="muted small">
+                Known copies in {fmt.format(w.copies)} libraries
+                {rismPerson && (
+                  <>
+                    {" "}
+                    (see <a href={rismPerson} target="_blank" rel="noreferrer">the composer's sources in RISM</a>)
+                  </>
+                )}
+                .
+              </p>
+            )}
           </>
         )}
         {!scores.length && !libraries.length && (

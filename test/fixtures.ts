@@ -103,6 +103,18 @@ export function fixtureInput(later = false): BuildInput {
     },
     musicbrainz: { fetchedAt: T, recordings: { "mb-debussy": { count: 500, at: T } } },
     gnd: null,
+    rism: {
+      fetchedAt: T,
+      people: { "2": { gnd: null, wikidata: "Q11" } },
+      libraries: { "D-B": "Staatsbibliothek zu Berlin", "A-Wn": "Österreichische Nationalbibliothek" },
+      sources: [
+        // Two copies of Brahms's clarinet quintet: the autograph is shown first.
+        { id: "9001", person: "2", title: "Quintets", medium: "cl, vl (2), vla, vlc", numbers: "op. 115", key: "b", excerpt: false, catalogue: [], type: "Manuscript copy", holdings: [{ siglum: "A-Wn", shelf: "Mus.Hs.9" }] },
+        { id: "9002", person: "2", title: "Quintets", medium: "cl, vl (2), vla, vlc", numbers: "op. 115", key: "b", excerpt: false, catalogue: [], type: "Autograph manuscript", holdings: [{ siglum: "D-B", shelf: "Mus.ms.autogr. Brahms 1" }] },
+        // A work we don't have: nothing added.
+        { id: "9003", person: "2", title: "Sonatas", medium: "vl, pf", numbers: "op. 999", key: null, excerpt: false, catalogue: [], type: "Print", holdings: [{ siglum: "D-B", shelf: null }] },
+      ],
+    },
     libris: {
       fetchedAt: T,
       total: 4,

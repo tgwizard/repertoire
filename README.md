@@ -9,7 +9,7 @@ Live at https://repertoire.tgwizard.com. See [/about](https://repertoire.tgwizar
 
 ## In short
 
-A crawler (`crawler/`) combines eight open sources (IMSLP, Wikipedia, Wikidata, Open Opus, MusicBrainz, Mutopia, LIBRIS and the German National Library's GND) into one SQLite database. Each version is published to R2 as downloads and loaded into its own Cloudflare D1 database. A Worker (`worker/`) serves a JSON API and server-rendered work and composer pages from it, and the React app (`src/`) is static assets.
+A crawler (`crawler/`) combines nine open sources (IMSLP, Wikipedia, Wikidata, Open Opus, MusicBrainz, Mutopia, LIBRIS, the German National Library's GND and RISM) into one SQLite database. Each version is published to R2 as downloads and loaded into its own Cloudflare D1 database. A Worker (`worker/`) serves a JSON API and server-rendered work and composer pages from it, and the React app (`src/`) is static assets.
 
 The dataset is [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) (it includes IMSLP and Wikipedia material). The code is MIT (see `LICENSE`).
 

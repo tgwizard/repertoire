@@ -14,12 +14,13 @@ import { crawlComposerEras, crawlImslp, type ImslpStage } from "./sources/imslp.
 import { crawlMusicBrainz } from "./sources/musicbrainz.ts";
 import { crawlGnd } from "./sources/gnd.ts";
 import { crawlLibris } from "./sources/libris.ts";
+import { crawlRism } from "./sources/rism.ts";
 import { crawlMutopia } from "./sources/mutopia.ts";
 import { crawlOpenOpus } from "./sources/openopus.ts";
 import { crawlWikidata, type WikidataStage } from "./sources/wikidata.ts";
 import { crawlWikipedia } from "./sources/wikipedia.ts";
 
-const STAGES = ["imslp", "wikipedia", "wikidata", "openopus", "composers", "musicbrainz", "mutopia", "libris", "gnd", "build"] as const;
+const STAGES = ["imslp", "wikipedia", "wikidata", "openopus", "composers", "musicbrainz", "mutopia", "libris", "gnd", "rism", "build"] as const;
 type Stage = (typeof STAGES)[number];
 
 const { values, positionals } = parseArgs({
@@ -78,6 +79,7 @@ for (const stage of STAGES) {
     if (stage === "mutopia") await crawlMutopia();
     if (stage === "libris") await crawlLibris();
     if (stage === "gnd") await crawlGnd();
+    if (stage === "rism") await crawlRism();
     if (stage === "build") {
       const { meta } = await buildDataset();
       await writeExports(DATASET_PATH, meta);

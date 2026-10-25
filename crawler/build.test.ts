@@ -77,6 +77,17 @@ test("a wrong IMSLP link on Wikidata doesn't split a composer: names decide", ()
   assert.deepEqual(links, [{ provider: "imslp", ref: "Haydn, Joseph" }, { provider: "wikidata", ref: "Q14" }]);
 });
 
+test("RISM: copies of works we have, the composer's own hand first; libraries counted", () => {
+  const brahms = work("Clarinet Quintet, Op.115");
+  assert.deepEqual(all("SELECT ref, label FROM links WHERE entity_id = ? AND provider = 'rism' ORDER BY position", brahms.id), [
+    { ref: "9002", label: "Autograph manuscript · Staatsbibliothek zu Berlin (D-B) · Mus.ms.autogr. Brahms 1" },
+    { ref: "9001", label: "Manuscript copy · Österreichische Nationalbibliothek (A-Wn) · Mus.Hs.9" },
+  ]);
+  assert.equal(brahms.copies, 3); // Berlin, Vienna (RISM) and Stockholm (LIBRIS)
+  assert.equal(all("SELECT * FROM works WHERE title LIKE '%999%'").length, 0);
+  assert.deepEqual(all("SELECT items, matched, added FROM sources WHERE id = 'rism'")[0], { items: 3, matched: 2, added: null });
+});
+
 test("works IMSLP lacks come in when a source states an exact line-up", () => {
   // Barber's Summer Music: only in Wikipedia's wind quintet category (in this first crawl).
   const barber = all("SELECT w.*, s.lineup FROM works w JOIN scorings s ON s.work_id = w.id WHERE w.title = 'Summer Music'");
@@ -145,7 +156,7 @@ test("downloads: a CSV per table with a README, and the database itself", async 
   assert.deepEqual([...files.keys()].sort(), ["README.txt", ...DATA_TABLES.map((t) => `${t}.csv`)].sort());
   assert.match(files.get("README.txt")!, /CC BY-SA 4\.0/);
   const worksCsv = files.get("works.csv")!.split("\r\n");
-  assert.equal(worksCsv[0], "n,id,title,aliases,composer_id,year,era,score,signals,recordings,sitelinks,free,lineup,lineups");
+  assert.equal(worksCsv[0], "n,id,title,aliases,composer_id,year,era,score,signals,recordings,sitelinks,free,lineup,lineups,copies");
   assert.equal(worksCsv.filter(Boolean).length - 1, all("SELECT COUNT(*) AS n FROM works")[0]!.n);
   const sqlite = gunzipSync(await readFile(join(dir, EXPORT_FILES.sqlite)));
   assert.deepEqual(sqlite, await readFile(path));

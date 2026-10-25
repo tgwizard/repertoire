@@ -107,7 +107,8 @@ test("a work: its line-ups, links, aliases and ranking", async () => {
   assert.deepEqual(w.scorings, [
     { lineup: "cello,clarinet,viola,violin*2", description: "clarinet, 2 violins, viola, cello", players: 5, arrangement: false, sources: [{ source: "imslp", ref: "For clarinet, 2 violins, viola, cello" }] },
   ]);
-  assert.deepEqual(w.links.map((l) => [l.provider, l.kind]), [["imslp", "score"], ["libris", "library"], ["openopus", "data"]]);
+  assert.deepEqual(w.links.map((l) => [l.provider, l.kind]), [["imslp", "score"], ["libris", "library"], ["rism", "library"], ["rism", "library"], ["openopus", "data"]]);
+  assert.match(w.links[2]!.label!, /^Autograph manuscript/); // the composer's own hand first
   assert.ok(Math.abs(w.scoreParts.reduce((s, p) => s + p.points, 0) - w.score) < 0.2);
 });
 
@@ -118,7 +119,7 @@ test("a composer: line-ups with counts; their works", async () => {
   assert.equal(c.sortName, "Brahms, Johannes");
   assert.equal(c.works, 2);
   assert.deepEqual(c.lineups.map((l) => l.key).sort(), ["cello,clarinet,viola,violin*2", QUARTET]);
-  assert.deepEqual(c.links.map((l) => l.provider).sort(), ["imslp", "wikidata", "wikipedia"]);
+  assert.deepEqual(c.links.map((l) => l.provider).sort(), ["imslp", "rism", "wikidata", "wikipedia"]);
   const works = await get<WorksPage>(`/api/works?composer=${c.id}`);
   assert.equal(works.total, 2);
 });

@@ -174,6 +174,17 @@ test("GND: instrumentation for works IMSLP can't have, without doubling composer
   void composers;
 });
 
+test("RISM: where copies of older works are kept, and how widely they were copied", async () => {
+  const [flute] = (await search("zauberflote k 620")).works;
+  assert.ok(flute, "Die Zauberflöte not found");
+  const w = await api<WorkDetail>(`/api/works/${flute.id}`);
+  assert.ok(w.copies > 100, `Die Zauberflöte in only ${w.copies} libraries`);
+  assert.ok(w.links.some((l) => l.provider === "rism" && l.url?.startsWith("https://rism.online/sources/")), "no RISM link");
+  assert.ok(w.scoreParts.some((p) => /Copies in \d+ libraries/.test(p.label)), "copies don't count towards the ranking");
+  const meta = await api<Meta>("/api/meta");
+  assert.ok((meta.sources.rism?.matched ?? 0) > 100_000, `only ${meta.sources.rism?.matched} RISM sources matched`);
+});
+
 test("composer pages: life, links and line-ups", async () => {
   const { composers } = await search("johannes brahms");
   assert.equal(composers[0]?.name, "Johannes Brahms");
