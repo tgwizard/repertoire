@@ -23,6 +23,7 @@ function isGeneric(part: string): boolean {
 function normalizeName(name: string, plural: boolean): string {
   // Instrument ids are lowercase, proper names included ("english horn", "wagner tuba").
   let n = name.trim().toLowerCase();
+  if (n === "small orchestra") n = "chamber orchestra";
   if (plural && !isGeneric(n)) n = n.split(" ").map(singularWord).join(" ");
   return n;
 }
@@ -91,9 +92,18 @@ export function parseEnsembleKey(key: string): Ensemble {
 /** Number of players (a group such as "orchestra" counts as one). */
 export const playerCount = (e: Ensemble) => Object.values(e).reduce((s, n) => s + n, 0);
 
+// Groups that can play what a smaller group of theirs can: a symphony orchestra has a
+// chamber orchestra and a string orchestra in it.
+const CONTAINS: Record<string, string[]> = {
+  orchestra: ["chamber orchestra", "strings"],
+  "chamber orchestra": ["strings"],
+};
+
 /** Whether every player `sub` needs is in `of`. */
 export function fitsIn(sub: Ensemble, of: Ensemble): boolean {
-  return Object.entries(sub).every(([id, n]) => (of[id] ?? 0) >= n);
+  const have: Ensemble = { ...of };
+  for (const [group, n] of Object.entries(of)) for (const inner of CONTAINS[group] ?? []) have[inner] = Math.max(have[inner] ?? 0, n);
+  return Object.entries(sub).every(([id, n]) => (have[id] ?? 0) >= n);
 }
 
 // ---- Palette ---------------------------------------------------------------
@@ -176,6 +186,7 @@ const P: [Family, string, string?][] = [
   ["voices", "male chorus"],
   ["voices", "female chorus"],
   ["ensembles", "orchestra", "symphony orchestra"],
+  ["ensembles", "chamber orchestra"],
   ["ensembles", "strings", "string orchestra"],
   ["ensembles", "wind band"],
   ["ensembles", "brass band"],
@@ -238,6 +249,7 @@ export const PRESETS: Preset[] = [
   { name: "Trio sonata", parts: { violin: 2, continuo: 1 } },
   { name: "Wind octet", parts: { oboe: 2, clarinet: 2, bassoon: 2, horn: 2 } },
   { name: "String orchestra", parts: { strings: 1 } },
+  { name: "Chamber orchestra", parts: { "chamber orchestra": 1 } },
   { name: "Wind band", parts: { "wind band": 1 } },
   { name: "Symphony orchestra", parts: { orchestra: 1 } },
   { name: "Choir & orchestra", parts: { voices: 1, "mixed chorus": 1, orchestra: 1 } },

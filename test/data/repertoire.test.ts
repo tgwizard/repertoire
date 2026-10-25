@@ -120,6 +120,14 @@ test("smaller groups: only line-ups the players can form, the full group's works
   assert.equal(nielsen!.players, 5);
 });
 
+test("an orchestra's smaller groups include chamber and string orchestra works", async () => {
+  const { lineups } = await api<LineupsIndex>("/api/lineups");
+  assert.ok((lineups["chamber orchestra"]?.[0] ?? 0) > 100, "too few chamber orchestra works");
+  const page = await api<WorksPage>(`/api/works?lineup=orchestra&subsets=1&limit=1&facets=1`);
+  const keys = page.facets!.lineups.map((l) => l.key);
+  assert.ok(keys.includes("chamber orchestra") && keys.includes("strings"), `orchestra's smaller groups: ${keys.join(" | ")}`);
+});
+
 test("work pages: links, line-ups and sources for well-known works", async () => {
   const [debussy] = (await search("debussy string quartet op 10")).works;
   assert.ok(debussy, "Debussy's quartet not found");

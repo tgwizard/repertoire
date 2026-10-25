@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { decodeEnsemble, describe, encodeEnsemble, ensembleKey, parseCategory, parseEnsembleKey } from "./instrumentation.ts";
+import { decodeEnsemble, describe, fitsIn, encodeEnsemble, ensembleKey, parseCategory, parseEnsembleKey } from "./instrumentation.ts";
 
 test("parses counts and plurals", () => {
   assert.deepEqual(parseCategory("For 2 violins, viola, cello"), {
@@ -66,4 +66,12 @@ test("describe pluralizes labels", () => {
 test("instrument ids are lowercase, and old links with capitals still work", () => {
   assert.deepEqual(parseCategory("For Wagner tuba, piano")?.parts, { "wagner tuba": 1, piano: 1 });
   assert.deepEqual(decodeEnsemble("English horn,oboe:2"), { "english horn": 1, oboe: 2 });
+});
+
+test("a symphony orchestra can play chamber and string orchestra works", () => {
+  assert.equal(fitsIn({ "chamber orchestra": 1 }, { orchestra: 1 }), true);
+  assert.equal(fitsIn({ strings: 1 }, { orchestra: 1 }), true);
+  assert.equal(fitsIn({ violin: 1, strings: 1 }, { violin: 1, "chamber orchestra": 1 }), true);
+  assert.equal(fitsIn({ orchestra: 1 }, { "chamber orchestra": 1 }), false);
+  assert.deepEqual(parseCategory("For cello and small orchestra")?.parts, { cello: 1, "chamber orchestra": 1 });
 });

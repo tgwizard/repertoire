@@ -245,7 +245,9 @@ export function AboutPage() {
             Works still in copyright are only here when the GND, LIBRIS, Wikipedia, Wikidata or Open Opus know their exact line-up; many
             contemporary works are, many aren't yet.
           </li>
-          <li>Orchestral works are “symphony orchestra” regardless of size; a chamber orchestra isn't told apart yet.</li>
+          <li>
+            Orchestral works are “symphony orchestra” unless a source says “chamber orchestra”; most sources don't describe an orchestra's size.
+          </li>
           <li>A few works appear twice when sources describe them too differently to match safely.</li>
           <li>Library copies are from one library (Musik- och teaterbiblioteket) so far, and publishers aren't linked yet.</li>
         </ul>

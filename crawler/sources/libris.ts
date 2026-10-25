@@ -120,7 +120,7 @@ const SWEDISH: Record<string, string> = {
   "basso continuo": "continuo", generalbas: "continuo", "b.c.": "continuo", "b.c": "continuo", bc: "continuo", slagverk: "percussion", pukor: "timpani", puka: "timpani",
   marimba: "marimba", vibrafon: "vibraphone", sång: "voice", röst: "voice", sopran: "soprano", alt: "alto", tenor: "tenor",
   baryton: "baritone", berättare: "narrator", recitation: "narrator", "blandad kör": "mixed chorus", kör: "mixed chorus",
-  manskör: "male chorus", damkör: "female chorus", orkester: "orchestra", symfoniorkester: "orchestra",
+  manskör: "male chorus", damkör: "female chorus", orkester: "orchestra", symfoniorkester: "orchestra", kammarorkester: "chamber orchestra",
   stråkorkester: "strings", blåsorkester: "wind band", brassband: "brass band",
 };
 

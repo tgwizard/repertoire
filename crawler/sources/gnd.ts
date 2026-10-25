@@ -211,7 +211,7 @@ const GERMAN: Record<string, string | Parts> = {
   Sprechstimme: "narrator",
   Chor: "mixed chorus", "Gemischter Chor": "mixed chorus", Männerchor: "male chorus", Frauenchor: "female chorus",
   Kinderchor: "childrens chorus", Knabenchor: "childrens chorus",
-  Orchester: "orchestra", Kammerorchester: "orchestra", Streichorchester: "strings", Blasorchester: "wind band",
+  Orchester: "orchestra", Kammerorchester: "chamber orchestra", Streichorchester: "strings", Blasorchester: "wind band",
   Streichquartett: STRING_QUARTET,
   Tonband: "tape", Zuspielaufnahme: "tape", Elektronik: "electronic sounds", "Live-Elektronik": "electronic sounds",
 };

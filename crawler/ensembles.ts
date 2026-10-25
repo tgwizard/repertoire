@@ -108,7 +108,7 @@ const PLAYERS: Record<string, number> = { duo: 2, trio: 3, quartet: 4, quintet: 
  * ("Sextet") must agree with the line-up's number of players.
  */
 export function titleFitsPlayers(title: string, parts: Ensemble): boolean {
-  if (parts.orchestra || parts.strings || parts["wind band"] || parts["brass band"]) return true;
+  if (parts.orchestra || parts["chamber orchestra"] || parts.strings || parts["wind band"] || parts["brass band"]) return true;
   const players = Object.values(parts).reduce((s, n) => s + n, 0);
   const t = title.toLowerCase();
   for (const [word, n] of Object.entries(PLAYERS)) {
