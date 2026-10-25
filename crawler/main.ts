@@ -1,13 +1,14 @@
 // Crawler CLI. Every HTTP response is cached under .cache/, so a run can be
 // interrupted and resumed, and re-runs only fetch what changed or expired.
 //
-//   node crawler/main.ts                     all stages, then build the index
+//   node crawler/main.ts                     all stages, then build the dataset
 //   node crawler/main.ts imslp build         just these stages
 //   node crawler/main.ts --min-works 20      skip tiny IMSLP categories (quicker first run)
 //   node crawler/main.ts --mb-budget 300     MusicBrainz lookups this run (1/second)
 
 import { parseArgs } from "node:util";
-import { build } from "./build.ts";
+import { buildDataset, DATASET_PATH } from "./build.ts";
+import { writeExports } from "./export.ts";
 import { collectGarbage, readStage } from "./http.ts";
 import { crawlComposerEras, crawlImslp, type ImslpStage } from "./sources/imslp.ts";
 import { crawlMusicBrainz } from "./sources/musicbrainz.ts";
@@ -68,7 +69,10 @@ for (const stage of STAGES) {
     if (stage === "openopus") await crawlOpenOpus();
     if (stage === "composers") await crawlComposerEras(await composerNames());
     if (stage === "musicbrainz") await crawlMusicBrainz({ budget: Number(values["mb-budget"]) });
-    if (stage === "build") await build();
+    if (stage === "build") {
+      const { meta } = await buildDataset();
+      await writeExports(DATASET_PATH, meta);
+    }
     const ns = gcNamespaces[stage];
     if (ns) completed.push(ns);
   } catch (e) {

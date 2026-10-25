@@ -5,5 +5,5 @@
     "lib": ["ES2023"],
     "types": ["node"]
   },
-  "include": ["vite.config.ts", "cloudflare.config.ts", "crawler", "smoke", "src/**/*.test.ts"]
+  "include": ["vite.config.ts", "cloudflare.config.ts", "crawler", "smoke", "test", "e2e", "src/**/*.test.ts", "worker/**/*.test.ts"]
 }

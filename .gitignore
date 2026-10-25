@@ -7,3 +7,5 @@ dist/
 .cloudflare/
 .cache/
 public/data/
+test-results/
+playwright-report/

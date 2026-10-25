@@ -1,43 +1,35 @@
-// Shape of the static index in public/data/, written by the crawler (crawler/build.ts)
-// and read by the app.
+// Shared between the crawler (which builds the database), the Worker (which serves it)
+// and the app: sources, ranking, and the shapes of API responses.
 
 export const ERAS = ["Medieval", "Renaissance", "Baroque", "Classical", "Romantic", "Early 20th century", "Modern"] as const;
 export type Era = (typeof ERAS)[number];
 
 export type SourceId = "imslp" | "wikipedia" | "wikidata" | "openopus" | "musicbrainz";
 
-export const SOURCES: Record<SourceId, { name: string; url: string; license: string; licenseUrl: string }> = {
-  imslp: {
-    name: "IMSLP",
-    url: "https://imslp.org",
-    license: "CC BY-SA 4.0",
-    licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
-  },
-  wikipedia: {
-    name: "Wikipedia",
-    url: "https://en.wikipedia.org",
-    license: "CC BY-SA 4.0",
-    licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
-  },
-  wikidata: {
-    name: "Wikidata",
-    url: "https://www.wikidata.org",
-    license: "CC0",
-    licenseUrl: "https://creativecommons.org/publicdomain/zero/1.0/",
-  },
-  openopus: {
-    name: "Open Opus",
-    url: "https://openopus.org",
-    license: "CC0",
-    licenseUrl: "https://creativecommons.org/publicdomain/zero/1.0/",
-  },
-  musicbrainz: {
-    name: "MusicBrainz",
-    url: "https://musicbrainz.org",
-    license: "CC0",
-    licenseUrl: "https://creativecommons.org/publicdomain/zero/1.0/",
-  },
+export interface SourceInfo {
+  name: string;
+  url: string;
+  license: string;
+  licenseUrl: string;
+  /** What this source contributes, for the footer */
+  role: string;
+}
+
+const CC_BY_SA = "https://creativecommons.org/licenses/by-sa/4.0/";
+const CC0 = "https://creativecommons.org/publicdomain/zero/1.0/";
+
+export const SOURCES: Record<SourceId, SourceInfo> = {
+  imslp: { name: "IMSLP", url: "https://imslp.org", license: "CC BY-SA 4.0", licenseUrl: CC_BY_SA, role: "Instrumentation, works and sheet music" },
+  wikipedia: { name: "Wikipedia", url: "https://en.wikipedia.org", license: "CC BY-SA 4.0", licenseUrl: CC_BY_SA, role: "Curated “Compositions for …” lists" },
+  wikidata: { name: "Wikidata", url: "https://www.wikidata.org", license: "CC0", licenseUrl: CC0, role: "Links between sources, dates" },
+  openopus: { name: "Open Opus", url: "https://openopus.org", license: "CC0", licenseUrl: CC0, role: "Popular and recommended works" },
+  musicbrainz: { name: "MusicBrainz", url: "https://musicbrainz.org", license: "CC0", licenseUrl: CC0, role: "Recording counts" },
 };
+
+/** The dataset as a whole (it includes CC BY-SA content). */
+export const DATA_LICENSE = { name: "CC BY-SA 4.0", url: CC_BY_SA };
+
+// ---- Ranking ---------------------------------------------------------------
 
 /** Evidence that a work is established repertoire, with the points it adds to the ranking score. */
 export const SIGNALS = {
@@ -53,61 +45,197 @@ export type Signal = keyof typeof SIGNALS;
 /** Score at or above which a work is labelled core repertoire. */
 export const CORE_SCORE = 6;
 
-export interface Composer {
-  name: string;
-  born?: number;
-  died?: number;
-  era?: Era;
-  /** IMSLP composer category, e.g. "Reicha, Anton" */
-  imslp?: string;
-  wikidata?: string;
-  /** English Wikipedia article title */
-  wikipedia?: string;
+export interface ScoreInput {
+  signals: Signal[];
+  /** Recordings on MusicBrainz */
+  recordings?: number | null;
+  /** Wikipedia language editions with an article on the work */
+  sitelinks?: number | null;
+  /** The same, for the composer */
+  composerSitelinks?: number | null;
 }
 
-export interface Work {
-  /** "imslp:<pageid>", "wd:<QID>" or "oo:<id>" */
+/** The ranking score, broken down into its parts (largest first). */
+export function scoreParts(w: ScoreInput): { label: string; points: number }[] {
+  const parts: { label: string; points: number }[] = w.signals.map((s) => ({ label: SIGNALS[s].label, points: SIGNALS[s].points }));
+  if (w.recordings) parts.push({ label: `${w.recordings} recordings on MusicBrainz`, points: Math.min(4, Math.log2(1 + w.recordings) / 2) });
+  if (w.sitelinks) parts.push({ label: `Articles in ${w.sitelinks} Wikipedias`, points: Math.min(2, w.sitelinks / 10) });
+  if (w.composerSitelinks) parts.push({ label: "Composer's notability (Wikipedia articles)", points: Math.min(1.5, Math.log2(1 + w.composerSitelinks) / 5) });
+  return parts.sort((a, b) => b.points - a.points);
+}
+
+export const score = (w: ScoreInput) => Math.round(scoreParts(w).reduce((s, p) => s + p.points, 0) * 10) / 10;
+
+// ---- Links -----------------------------------------------------------------
+
+/**
+ * Where to find a work or composer elsewhere. "score": sheet music to download;
+ * "library": a copy to borrow; "reference": an article; "data": a database record.
+ */
+export type LinkKind = "score" | "library" | "reference" | "data";
+
+export type ProviderId = SourceId;
+
+export const PROVIDERS: Record<ProviderId, { name: string; kind: LinkKind }> = {
+  imslp: { name: "IMSLP", kind: "score" },
+  wikipedia: { name: "Wikipedia", kind: "reference" },
+  wikidata: { name: "Wikidata", kind: "data" },
+  musicbrainz: { name: "MusicBrainz", kind: "data" },
+  openopus: { name: "Open Opus", kind: "data" },
+};
+
+export interface Link {
+  provider: ProviderId;
+  kind: LinkKind;
+  /** The provider's own id: IMSLP page id, Wikidata QID, Wikipedia title… */
+  ref: string;
+  /** null when the provider has no page for it (Open Opus works) */
+  url: string | null;
+  label: string | null;
+  /** The source that gave us this link */
+  source: SourceId;
+}
+
+const wikiPath = (title: string) => encodeURIComponent(title.replaceAll(" ", "_"));
+export const imslpUrl = (title: string) => `https://imslp.org/wiki/${wikiPath(title)}`;
+export const imslpCategoryUrl = (name: string) => `https://imslp.org/wiki/Category:${wikiPath(name)}`;
+export const wikipediaUrl = (title: string) => `https://en.wikipedia.org/wiki/${wikiPath(title)}`;
+export const wikipediaCategoryUrl = (name: string) => `https://en.wikipedia.org/wiki/Category:${wikiPath(name)}`;
+export const wikidataUrl = (qid: string) => `https://www.wikidata.org/wiki/${qid}`;
+export const musicbrainzUrl = (id: string) => `https://musicbrainz.org/work/${id}`;
+
+/** URL of the category or item that defines a line-up in a source, if any. */
+export function lineupSourceUrl(source: SourceId, ref: string): string | null {
+  if (source === "imslp") return imslpCategoryUrl(ref);
+  if (source === "wikipedia") return wikipediaCategoryUrl(ref);
+  if (source === "wikidata") return wikidataUrl(ref);
+  return null;
+}
+
+// ---- API -------------------------------------------------------------------
+
+export interface ComposerRef {
+  id: string;
+  name: string;
+  born: number | null;
+  died: number | null;
+}
+
+/** A work in a list. `lineup`/`arrangement` describe the version that put it in the list. */
+export interface WorkSummary {
   id: string;
   title: string;
-  /** Key into the shard's composers map */
-  composer?: string;
-  /** Year of composition (or first publication), from Wikidata */
-  year?: number;
-  era?: Era;
-  /** Only known through an arrangement for this line-up */
-  arr?: true;
+  composer: ComposerRef | null;
+  year: number | null;
+  era: Era | null;
   score: number;
-  signals: Signal[];
-  /** Sources stating this work is for this line-up */
-  via: SourceId[];
-  imslp?: string;
-  wikidata?: string;
-  wikipedia?: string;
-  /** Open Opus work (a hash of composer and title: the dump has no ids) */
-  openopus?: string;
-  musicbrainz?: string;
-  /** Recording count on MusicBrainz */
-  recordings?: number;
+  /** Free sheet music (IMSLP), if any */
+  scoreUrl: string | null;
+  lineup: string;
+  players: number;
+  arrangement: boolean;
 }
 
-export interface EnsembleShard {
-  /** Category names that define this line-up, per source (first shard of an ensemble only) */
-  sources?: Partial<Record<SourceId, string[]>>;
-  works: Work[];
+export interface Scoring {
+  lineup: string;
+  description: string;
+  players: number;
+  arrangement: boolean;
+  /** Which sources say the work is for this line-up, and where */
+  sources: { source: SourceId; ref: string }[];
 }
 
-/** data/shards/<n>.json */
-export interface ShardFile {
-  composers: Record<string, Composer>;
-  ensembles: Record<string, EnsembleShard>;
+export interface WorkDetail {
+  id: string;
+  title: string;
+  /** Titles other sources use */
+  aliases: string[];
+  composer: (ComposerRef & { era: Era | null }) | null;
+  year: number | null;
+  era: Era | null;
+  score: number;
+  scoreParts: { label: string; points: number }[];
+  scorings: Scoring[];
+  links: Link[];
 }
 
-/** data/ensembles.json */
-export interface EnsemblesFile {
+export interface ComposerDetail extends ComposerRef {
+  era: Era | null;
+  sortName: string;
+  works: number;
+  links: Link[];
+  /** Line-ups with the composer's works, most first */
+  lineups: { key: string; description: string; count: number }[];
+}
+
+export interface Facets {
+  eras: Partial<Record<Era | "Unknown", number>>;
+  composers: { id: string; name: string; count: number }[];
+  /** Sub-line-ups, when listing a group's smaller groups too */
+  lineups: { key: string; description: string; players: number; count: number }[];
+  core: number;
+  free: number;
+}
+
+export interface WorksPage {
+  total: number;
+  offset: number;
+  works: WorkSummary[];
+  facets: Facets | null;
+}
+
+export interface SearchResults {
+  composers: (ComposerRef & { works: number })[];
+  works: WorkSummary[];
+  total: number;
+}
+
+/** Works per line-up: key → [original works, arrangement-only works] */
+export interface LineupsIndex {
+  version: string;
+  lineups: Record<string, [number, number]>;
+}
+
+export interface SourceStats {
+  fetchedAt: string | null;
+  /** Records pulled from the source */
+  items: number;
+  /** Records matched to a work we already had (from an earlier source) */
+  matched: number | null;
+  /** Works only this source knows */
+  added: number | null;
+  note: string;
+}
+
+export interface DatasetStats {
+  core: number;
+  /** Works with free sheet music */
+  free: number;
+  /** Works known only through arrangements */
+  arrangementOnly: number;
+  /** Per source: line-up assignments it vouches for, and links it gave */
+  bySource: Record<SourceId, { lineups: number; links: number }>;
+  links: Record<ProviderId, number>;
+  eras: Partial<Record<Era | "Unknown", number>>;
+  /** Line-ups and their works (originals) by number of players: "1" … "9", "10+" */
+  sizes: { players: string; lineups: number; works: number }[];
+  topLineups: { key: string; description: string; works: number }[];
+  redirects: number;
+}
+
+export interface Meta {
+  version: string;
   builtAt: string;
-  /** ensemble key → [original works, arrangement-only works, shard numbers in rank order] */
-  ensembles: Record<string, [number, number, number[]]>;
+  works: number;
+  composers: number;
+  lineups: number;
+  sources: Record<SourceId, SourceStats>;
+  stats: DatasetStats | null;
 }
+
+export type WorkSort = "rank" | "players" | "chronological" | "composer" | "title";
+
+// ---- Published datasets ----------------------------------------------------
 
 /** Public, versioned datasets (Cloudflare R2): datasets/latest.json, datasets/<version>/… */
 export const DATASETS_URL = "https://repertoire-data.tgwizard.com/datasets";
@@ -119,13 +247,4 @@ export interface LatestFile {
   version: string;
   builtAt: string;
   files: Record<string, { bytes: number; sha256: string }>;
-}
-
-/** data/meta.json */
-export interface MetaFile {
-  version: string;
-  builtAt: string;
-  works: number;
-  ensembles: number;
-  sources: Record<SourceId, { fetchedAt: string | null; items: number; note: string }>;
 }

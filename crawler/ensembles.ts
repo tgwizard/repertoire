@@ -120,8 +120,8 @@ export function titleFitsPlayers(title: string, parts: Ensemble): boolean {
 const SOLOISTS = "violin|viola|cello|piano|flute|clarinet|oboe|horn|trumpet|bassoon|harp|guitar";
 
 /**
- * Open Opus titles that name an exact line-up. Symphonies only when no other scoring is
- * named ("Symphony no. 14, for soprano, bass, strings…"); concertos only for composers
+ * Open Opus titles that name an exact line-up, and no other scoring ("Symphony no. 14,
+ * for soprano, bass, strings…" isn't for orchestra alone); concertos only for composers
  * born 1720+ (earlier ones are for strings and continuo); sonatas for those born 1750+.
  */
 export function openOpusEnsemble(title: string, genre: string, composerBorn: number | null): Ensemble | null {
@@ -139,8 +139,10 @@ export function openOpusEnsemble(title: string, genre: string, composerBorn: num
     [/^string trio\b/, STRING_TRIO],
     [/^string sextet\b/, STRING_SEXTET],
   ];
-  for (const [re, e] of rules) if (re.test(t)) return e;
+  // A title that spells out its scoring ("String Quartet no. 3, for soprano and string
+  // quartet") is for something other than the plain genre.
   const scored = /\bfor\b|soprano|alto\b|tenor|baritone|\bbass\b|voice|chorus|choir|organ/.test(t);
+  for (const [re, e] of rules) if (re.test(t)) return scored ? null : e;
   if (genre === "Orchestral" && /^symphony\b/.test(t) && !scored) return ORCHESTRA;
   const concerto = new RegExp(`^(${SOLOISTS}) concerto\\b`).exec(t);
   if (concerto && genre === "Orchestral" && composerBorn !== null && composerBorn >= 1720) return E(`${concerto[1]},orchestra`);

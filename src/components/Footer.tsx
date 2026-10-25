@@ -1,36 +1,31 @@
-import { DATASETS_URL, EXPORT_FILES, SOURCES, type MetaFile, type SourceId } from "../shared/data";
+import { Link } from "../lib/router";
+import { FEEDBACK_MAILTO, REPO } from "../shared/paths";
+import { DATA_LICENSE, DATASETS_URL, EXPORT_FILES, SOURCES, type Meta, type SourceId } from "../shared/data";
 
-const ROLE: Record<SourceId, string> = {
-  imslp: "Instrumentation, works and sheet music",
-  wikipedia: "Curated “Compositions for …” lists",
-  wikidata: "Links between sources, dates",
-  openopus: "Popular and recommended works",
-  musicbrainz: "Recording counts",
-};
-
-const date = (iso: string | null | undefined) =>
-  iso ? new Date(iso).toLocaleDateString("en", { year: "numeric", month: "short", day: "numeric" }) : "not yet";
+// ISO 8601, never locale-dependent.
+const date = (iso: string | null | undefined) => (iso ? iso.slice(0, 10) : "not yet");
 const fmt = new Intl.NumberFormat("en");
 
-export function Footer({ meta }: { meta: MetaFile | null }) {
+export function Footer({ meta }: { meta: Meta | null }) {
   return (
     <footer className="footer">
       <div className="footer-dataset">
         <p>
           {meta ? (
             <>
-              Dataset rebuilt <strong>{date(meta.builtAt)}</strong>: {fmt.format(meta.works)} works, {fmt.format(meta.ensembles)} line-ups.
+              Dataset rebuilt <strong>{date(meta.builtAt)}</strong>: {fmt.format(meta.works)} works by {fmt.format(meta.composers)} composers,{" "}
+              {fmt.format(meta.lineups)} line-ups.
             </>
           ) : (
-            "Dataset not built yet."
+            "Dataset not loaded."
           )}{" "}
           {meta && (
             <>
               Download it as <a href={`${DATASETS_URL}/${meta.version}/${EXPORT_FILES.csv}`}>CSV (zip)</a> or{" "}
-              <a href={`${DATASETS_URL}/${meta.version}/${EXPORT_FILES.sqlite}`}>SQLite</a>,{" "}
+              <a href={`${DATASETS_URL}/${meta.version}/${EXPORT_FILES.sqlite}`}>SQLite</a>, or use the <a href="/api">API</a>,{" "}
             </>
           )}
-          licensed <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>.
+          licensed <a href={DATA_LICENSE.url}>{DATA_LICENSE.name}</a>.
         </p>
       </div>
       <table className="footer-sources">
@@ -44,7 +39,7 @@ export function Footer({ meta }: { meta: MetaFile | null }) {
                 <th scope="row">
                   <a href={s.url}>{s.name}</a>
                 </th>
-                <td>{ROLE[id]}</td>
+                <td>{s.role}</td>
                 <td>
                   <a href={s.licenseUrl}>{s.license}</a>
                 </td>
@@ -55,8 +50,8 @@ export function Footer({ meta }: { meta: MetaFile | null }) {
         </tbody>
       </table>
       <p>
-        An independent project, not affiliated with any of these sources. Code on{" "}
-        <a href="https://github.com/tgwizard/repertoire">GitHub</a> (MIT).
+        <Link href="/about">About the data</Link>, its sources and license · An independent project, not affiliated with any of these sources ·
+        Code on <a href={REPO}>GitHub</a> (MIT) · <a href={FEEDBACK_MAILTO}>Feedback welcome</a>
       </p>
     </footer>
   );

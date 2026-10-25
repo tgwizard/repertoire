@@ -1,21 +1,8 @@
 // Matching works and composers across sources that share no identifiers.
 
-export function normalize(s: string): string {
-  return s
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .replace(/ß/g, "ss")
-    // Letters that NFD doesn't decompose
-    .replace(/ł/g, "l")
-    .replace(/ø/g, "o")
-    .replace(/æ/g, "ae")
-    .replace(/œ/g, "oe")
-    .replace(/đ/g, "d")
-    .replace(/ı/g, "i")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
+import { normalize } from "../src/shared/text.ts";
+
+export { normalize };
 
 // Catalogue systems, as [prefix used in keys, pattern]. The pattern's first group is the number.
 const CATALOGUES: [string, RegExp][] = [

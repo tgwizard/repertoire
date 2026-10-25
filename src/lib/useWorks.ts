@@ -1,0 +1,56 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Facets, WorkSummary, WorksPage } from "../shared/data";
+import { api } from "./api";
+
+export const WORKS_PAGE = 50;
+const PAGE = WORKS_PAGE;
+
+interface State {
+  works: WorkSummary[];
+  total: number;
+  facets: Facets | null;
+  loading: boolean;
+  error: string | null;
+}
+
+/**
+ * Pages of /api/works (or /api/search) for a query without offset/limit. Facets come
+ * with the first page. "Load more" appends the next page; a new query starts over,
+ * keeping the old list on screen until the new one arrives.
+ */
+export function useWorks(query: string | null, endpoint = "/api/works") {
+  const [state, setState] = useState<State>({ works: [], total: 0, facets: null, loading: !!query, error: null });
+  const [pages, setPages] = useState(1);
+  const current = useRef(query);
+
+  useEffect(() => {
+    current.current = query;
+    setPages(1);
+  }, [query]);
+
+  useEffect(() => {
+    if (!query) return;
+    let cancelled = false;
+    setState((s) => ({ ...s, loading: true, error: null }));
+    const offsets = Array.from({ length: pages }, (_, i) => i * PAGE);
+    Promise.all(offsets.map((o) => api<WorksPage>(`${endpoint}?${query}&limit=${PAGE}&offset=${o}${o === 0 ? "&facets=1" : ""}`))).then(
+      (results) => {
+        if (cancelled || current.current !== query) return;
+        setState({
+          works: results.flatMap((r) => r.works),
+          total: results[0]!.total,
+          facets: results[0]!.facets ?? null,
+          loading: false,
+          error: null,
+        });
+      },
+      (e: Error) => !cancelled && setState((s) => ({ ...s, loading: false, error: e.message })),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [query, pages, endpoint]);
+
+  const loadMore = useCallback(() => setPages((p) => p + 1), []);
+  return { ...state, hasMore: state.works.length < state.total, loadMore };
+}

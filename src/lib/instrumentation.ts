@@ -87,6 +87,14 @@ export function parseEnsembleKey(key: string): Ensemble {
   return e;
 }
 
+/** Number of players (a group such as "orchestra" counts as one). */
+export const playerCount = (e: Ensemble) => Object.values(e).reduce((s, n) => s + n, 0);
+
+/** Whether every player `sub` needs is in `of`. */
+export function fitsIn(sub: Ensemble, of: Ensemble): boolean {
+  return Object.entries(sub).every(([id, n]) => (of[id] ?? 0) >= n);
+}
+
 // ---- Palette ---------------------------------------------------------------
 
 export type Family = "woodwinds" | "brass" | "strings" | "keyboards" | "percussion" | "voices" | "ensembles";

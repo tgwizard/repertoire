@@ -27,4 +27,6 @@ test("Open Opus titles", () => {
   assert.equal(openOpusEnsemble("Serenade", "Chamber", 1833), null);
   assert.equal(openOpusEnsemble("Symphony no. 14, for soprano, bass, strings and percussion", "Orchestral", 1906), null);
   assert.equal(openOpusEnsemble("Violin Concerto in B flat major, op. 7/i, no. 2", "Orchestral", 1678), null);
+  assert.equal(openOpusEnsemble("String Quartet no. 3, for soprano and string quartet, op. 40", "Chamber", 1914), null);
+  assert.equal(openOpusEnsemble("String Quartet no. 2, for violin, viola, cello and double bass", "Chamber", 1941), null);
 });

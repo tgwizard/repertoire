@@ -1,112 +1,74 @@
-import { useEffect, useState } from "react";
-import { Intro, NoMatches } from "./components/EmptyState";
-import { EnsembleBuilder } from "./components/EnsembleBuilder";
+import { useEffect, useRef } from "react";
+import { AboutPage } from "./components/AboutPage";
+import { ComposerPage } from "./components/ComposerPage";
+import { FinderPage } from "./components/FinderPage";
 import { Footer } from "./components/Footer";
-import { Results } from "./components/Results";
-import { loadEnsembles, loadMeta } from "./lib/data";
-import { decodeEnsemble, describe, encodeEnsemble, ensembleKey, type Ensemble } from "./lib/instrumentation";
-import { useDebounced } from "./lib/useDebounced";
-import type { EnsemblesFile, MetaFile } from "./shared/data";
+import { SearchBox, SearchPage } from "./components/Search";
+import { WorkPage } from "./components/WorkPage";
+import { lineupsPath, metaPath, useApi } from "./lib/api";
+import { Link, parseRoute, useLocation } from "./lib/router";
+import type { LineupsIndex, Meta } from "./shared/data";
 
-function readUrl() {
-  const p = new URLSearchParams(location.search);
-  return { ensemble: decodeEnsemble(p.get("i")), includeArr: p.get("arr") === "1" };
+function SiteTitle({ as: Tag }: { as: "h1" | "p" }) {
+  return (
+    <Tag className="site-title">
+      <Link href="/" className="home-link">
+        Repertoire <em>Finder</em>
+      </Link>
+    </Tag>
+  );
 }
 
 export function App() {
-  const [index, setIndex] = useState<EnsemblesFile["ensembles"] | null>(null);
-  const [meta, setMeta] = useState<MetaFile | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [ensemble, setEnsemble] = useState<Ensemble>(() => readUrl().ensemble);
-  const [includeArr, setIncludeArr] = useState(() => readUrl().includeArr);
+  const loc = useLocation();
+  const route = parseRoute(loc.pathname, loc.search);
+  const { data: meta } = useApi<Meta>(metaPath);
+  const { data: index, error } = useApi<LineupsIndex>(lineupsPath);
 
+  // The finder stays mounted under other pages; going back restores where you were.
+  const finderScroll = useRef(0);
+  const wasFinder = useRef(route.name === "finder");
   useEffect(() => {
-    loadEnsembles()
-      .then((r) => setIndex(r.ensembles))
-      .catch((e: Error) => setLoadError(e.message));
-    loadMeta()
-      .then(setMeta)
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    const p = new URLSearchParams();
-    const enc = encodeEnsemble(ensemble);
-    if (enc) p.set("i", enc);
-    if (includeArr) p.set("arr", "1");
-    const qs = p.toString().replaceAll("%2C", ",").replaceAll("%3A", ":");
-    history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
-    document.title = enc ? `${describe(ensemble)} · Repertoire Finder` : "Repertoire Finder";
-  }, [ensemble, includeArr]);
-
-  const count = (e: Ensemble) => {
-    const entry = index?.[ensembleKey(e)];
-    return entry ? entry[0] + (includeArr ? entry[1] : 0) : 0;
-  };
-
-  // Wait for the ensemble to settle before loading works.
-  const settled = useDebounced(ensemble, 300);
-  const settledKey = ensembleKey(settled);
-  const settledEntry = index?.[settledKey];
-
-  const main = () => {
-    if (Object.keys(ensemble).length === 0) return <Intro meta={meta} />;
-    if (count(ensemble) === 0) {
-      return (
-        <NoMatches
-          ensemble={ensemble}
-          count={count}
-          arrangements={index?.[ensembleKey(ensemble)]?.[1] ?? 0}
-          onChange={setEnsemble}
-          onIncludeArr={() => setIncludeArr(true)}
-        />
-      );
-    }
-    if (!settledEntry || count(settled) === 0) return null;
-    return <Results key={settledKey} ensembleKey={settledKey} shards={settledEntry[2]} total={count(settled)} includeArr={includeArr} />;
-  };
+    const isFinder = route.name === "finder";
+    if (isFinder && !wasFinder.current) requestAnimationFrame(() => window.scrollTo(0, finderScroll.current));
+    wasFinder.current = isFinder;
+    if (!isFinder) return;
+    const save = () => (finderScroll.current = window.scrollY);
+    window.addEventListener("scroll", save, { passive: true });
+    return () => window.removeEventListener("scroll", save);
+  }, [route.name]);
 
   return (
     <div className="page">
       <header className="masthead">
-        <h1>
-          Repertoire <em>Finder</em>
-        </h1>
+        <div className="masthead-row">
+          {/* The site's name is the page heading only on the finder; other pages have their own. */}
+          <SiteTitle as={route.name === "finder" ? "h1" : "p"} />
+          <SearchBox initial={route.name === "search" ? route.q : ""} />
+        </div>
         <p className="tagline">
           The repertoire for the group you actually have, with sheet music from IMSLP where it exists.{" "}
           <a href="https://github.com/tgwizard/repertoire/issues">Bugs</a> and{" "}
-          <a href="mailto:tgwizard@gmail.com?subject=%5Brepertoire%5D%20bug">feedback</a> welcome.
+          <a href="mailto:tgwizard@gmail.com?subject=%5Brepertoire%5D%20bug">feedback</a> welcome.{" "}
+          <Link href="/about">About the data</Link>.
         </p>
       </header>
 
-      {loadError ? (
-        <div className="notice error">
-          Couldn't load the repertoire index: {loadError}. Get it with <code>npm run data:pull</code>.
-        </div>
+      {error ? (
+        <div className="notice error">Couldn't load the repertoire: {error.message}.</div>
       ) : !index ? (
         <div className="notice">
-          <span className="spinner" /> Loading the repertoire index…
+          <span className="spinner" /> Loading the repertoire…
         </div>
       ) : (
-        <div className="layout">
-          <aside className="sidebar">
-            <EnsembleBuilder
-              count={count}
-              ensemble={ensemble}
-              onChange={setEnsemble}
-              includeArr={includeArr}
-              onIncludeArrChange={setIncludeArr}
-            />
-          </aside>
-          {/* The footer lives in the results column so the layout reaches the bottom of the
-              page; otherwise its end pushes the sticky sidebar up, which jumps on "Load more". */}
-          <main className="main">
-            {main()}
-            <Footer meta={meta} />
-          </main>
-        </div>
+        <FinderPage index={index} meta={meta} active={route.name === "finder"} />
       )}
-      {(loadError || !index) && <Footer meta={meta} />}
+      {route.name === "work" && <WorkPage id={route.id} />}
+      {route.name === "composer" && <ComposerPage key={route.id} id={route.id} />}
+      {route.name === "search" && <SearchPage q={route.q} />}
+      {route.name === "about" && <AboutPage />}
+      {route.name === "notfound" && <div className="notice">There's no page here. Try the search above.</div>}
+      <Footer meta={meta} />
     </div>
   );
 }
