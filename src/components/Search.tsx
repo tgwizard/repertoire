@@ -11,14 +11,16 @@ interface FieldProps {
   onChange: (q: string) => void;
   /** Searching within a line-up rather than everything */
   narrowed: boolean;
+  id?: string;
 }
 
 /** The finder's search: everything, or within the picked line-up. */
-export function SearchField({ value, onChange, narrowed }: FieldProps) {
+export function SearchField({ value, onChange, narrowed, id }: FieldProps) {
   return (
     <form className="search-box" role="search" onSubmit={(e) => e.preventDefault()}>
       <input
         type="search"
+        id={id}
         name="q"
         placeholder={narrowed ? "Search within this line-up: title, composer, Op. or K. number…" : "Search works and composers"}
         aria-label="Search works and composers"

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useApi } from "../lib/api";
 import { describe, parseEnsembleKey, playerCount } from "../lib/instrumentation";
 import { describeOrchestration, EXAMPLES, formatOrchestration, hasOrchestra, readOrchestration } from "../lib/orchestration";
@@ -25,6 +25,8 @@ interface Props {
   smallerGroups: number;
   /** Search text from the finder's search box */
   q: string;
+  /** The finder's search field, shown with the filters */
+  search: ReactNode;
   /** Filters and sort, kept in the URL */
   filters: Filters;
   onFiltersChange: (f: Filters) => void;
@@ -81,7 +83,7 @@ function LineupSources({ lineup }: { lineup: string }) {
   );
 }
 
-export function Results({ lineup, total, includeArr, smaller, onSmallerChange, smallerGroups, q, filters, onFiltersChange, orchestra, onOrchestraChange, exact, onExactChange, onSearchEverywhere }: Props) {
+export function Results({ lineup, total, includeArr, smaller, onSmallerChange, smallerGroups, q, search, filters, onFiltersChange, orchestra, onOrchestraChange, exact, onExactChange, onSearchEverywhere }: Props) {
   const players = playerCount(parseEnsembleKey(lineup));
   const { eras, composer, show, minPlayers, within, length } = filters;
   const sorting: Sorting = { sort: filters.sort, order: filters.order };
@@ -144,6 +146,206 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
 
   return (
     <section className="results" aria-label="Works" ref={sectionRef}>
+      {/* Everything that narrows the list, together */}
+      <div className="filter-box">
+        {search}
+
+        {players > 1 && (
+          <div className="smaller-row">
+            <label className="toggle">
+              <input type="checkbox" checked={smaller} onChange={(e) => onSmallerChange(e.target.checked)} />
+              <span>
+                Include smaller groups from these players
+                {smallerGroups > 0 && !smaller && (
+                  <span className="muted">
+                    {" "}
+                    · {fmt.format(smallerGroups)} {smallerGroups === 1 ? "group has" : "groups have"} works
+                  </span>
+                )}
+              </span>
+            </label>
+            {smaller && (
+              <>
+                <select value={minPlayers} onChange={(e) => set({ minPlayers: Number(e.target.value), within: "" })} aria-label="Smallest group">
+                  {Array.from({ length: Math.max(1, players - 1) }, (_, i) => i + 1).map((n) => (
+                    <option key={n} value={n}>
+                      {n === 1 ? "Solos and up" : `${n}+ players`}
+                    </option>
+                  ))}
+                </select>
+                <select value={within} onChange={(e) => set({ within: e.target.value })} aria-label="Group">
+                  <option value="">All groups{f?.lineups.length ? ` (${f.lineups.length})` : ""}</option>
+                  {(f?.lineups ?? []).map((l) => (
+                    <option key={l.key} value={l.key}>
+                      {l.description} ({fmt.format(l.count)})
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+          </div>
+        )}
+
+        {withOrchestra && (
+          <div className="orchestra-row">
+            <div className="orchestra-field">
+              <span className="orchestra-label">
+                <label className="filter-label" htmlFor="orchestra">
+                Your orchestra
+              </label>
+                <InfoTip label="How to write an orchestra">
+                  {(close) => (
+                    <>
+                      Winds and brass as players per section: <strong>flutes.oboes.clarinets.bassoons</strong>, then{" "}
+                      <strong>horns.trumpets.trombones.tuba</strong>. Then the rest: timp, perc, hp, cel, pf, org, hpd, str (strings), with a
+                      number for more than one (2hp, 3perc). A piccolo, English horn and the like go after their section with +: 3+picc.
+                      <span className="orchestra-examples">
+                        {EXAMPLES.map(([label, scoring]) => (
+                          <button
+                            key={label}
+                            type="button"
+                            className="orchestra-example"
+                            onClick={() => {
+                              onOrchestraChange(scoring);
+                              close();
+                            }}
+                          >
+                            <span>{label}</span> <code>{scoring}</code>
+                          </button>
+                        ))}
+                      </span>
+                    </>
+                  )}
+                </InfoTip>
+              </span>
+              <input
+                id="orchestra"
+                aria-invalid={!!unreadable}
+                aria-describedby="orchestra-hint"
+                value={orchestra}
+                onChange={(e) => onOrchestraChange(e.target.value)}
+                placeholder="e.g. 2.2.2.2 4.2.3.1 timp str"
+                spellCheck={false}
+                autoCapitalize="off"
+                autoComplete="off"
+              />
+            </div>
+            <select value={exact ? "exact" : "within"} onChange={(e) => onExactChange(e.target.value === "exact")} aria-label="Match">
+              <option value="within">What it can play</option>
+              <option value="exact">Scored exactly so</option>
+            </select>
+            {/* Always there, two lines tall, so typing doesn't move the page */}
+            <p id="orchestra-hint" className={`orchestra-hint${unreadable ? " invalid" : ""}`} aria-live="polite">
+              {unreadable ? (
+                <>
+                  <strong>Couldn't read “{unreadable}”.</strong> Write it like{" "}
+                  <button type="button" className="link-button" onClick={() => onOrchestraChange(EXAMPLES[1]![1])}>
+                    <code>{EXAMPLES[1]![1]}</code>
+                  </button>
+                  ; the ? above explains how.
+                </>
+              ) : ours ? (
+                <>
+                  {describeOrchestration(ours)}.
+                  {unscored > 0 && (
+                    <span className="muted">
+                      {" "}
+                      Leaves out {fmt.format(unscored)} orchestral {unscored === 1 ? "work" : "works"} whose scoring we don't know.
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  Write it like{" "}
+                  <button type="button" className="link-button" onClick={() => onOrchestraChange(EXAMPLES[1]![1])}>
+                    <code>{EXAMPLES[1]![1]}</code>
+                  </button>{" "}
+                  to see what it can play; the ? explains how.
+                </>
+              )}
+            </p>
+          </div>
+        )}
+
+        <div className="filters">
+          <div className="filter-chips">
+            <div className="filter-group" role="group" aria-labelledby="show-label">
+              <span className="filter-label" id="show-label">
+                Show
+              </span>
+              <div className="era-chips">
+                {(
+                  [
+                    ["all", "All", null],
+                    ["core", "Core repertoire", f?.core],
+                    ["free", "Free sheet music", f?.free],
+                  ] as [Show, string, number | null | undefined][]
+                ).map(([value, label, n]) => (
+                  <button key={value} className={`era-chip${show === value ? " active" : ""}`} aria-pressed={show === value} onClick={() => set({ show: value })}>
+                    {label} {n !== null && n !== undefined && <span className="era-count">{fmt.format(n)}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {eraOptions.length > 0 && (
+              <div className="filter-group" role="group" aria-labelledby="era-label">
+                <span className="filter-label" id="era-label">
+                  Era
+                </span>
+                <div className="era-chips">
+                  {eraOptions.map((e) => (
+                    <button key={e} className={`era-chip${eras.includes(e) ? " active" : ""}`} aria-pressed={eras.includes(e)} onClick={() => toggleEra(e)}>
+                      {e} <span className="era-count">{fmt.format(f?.eras[e as keyof typeof f.eras] ?? 0)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="filter-row">
+            <div className="filter-group">
+              <label className="filter-label" htmlFor="filter-composer">
+                Composer
+              </label>
+              <select id="filter-composer" value={composer} onChange={(e) => set({ composer: e.target.value })}>
+                <option value="">All composers{f ? ` (${fmt.format(f.composers.length)}${f.composers.length === 300 ? "+" : ""})` : ""}</option>
+                {(f?.composers ?? []).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.count})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="filter-group">
+              <label className="filter-label" htmlFor="filter-length">
+                Length
+              </label>
+              <select id="filter-length" value={length} onChange={(e) => set({ length: e.target.value })}>
+                <option value="">Any length</option>
+                {LENGTHS.map((l, i) => (
+                  <option key={l.label} value={lengthKey(l)}>
+                    {l.label}
+                    {f ? ` (${fmt.format(f.lengths.known[i] ?? 0)})` : ""}
+                  </option>
+                ))}
+                <option value="unknown">Length unknown{f ? ` (${fmt.format(f.lengths.unknown)})` : ""}</option>
+              </select>
+            </div>
+            <div className="filter-group">
+              <label className="filter-label" htmlFor="filter-sort">
+                Sort
+              </label>
+              <SortSelect
+                id="filter-sort"
+                sorting={sorting}
+                onChange={(s) => set({ sort: s.sort, order: s.order })}
+                sorts={smaller && !within ? ["players", "rank", "chronological", "duration", "composer", "title"] : ["rank", "chronological", "duration", "composer", "title"]}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="results-head">
         {/* One line however it's filtered, so filtering doesn't move the list */}
         <h2>
@@ -161,167 +363,6 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
             </button>
           </p>
         )}
-      </div>
-      {players > 1 && (
-        <div className="smaller-row">
-          <label className="toggle">
-            <input type="checkbox" checked={smaller} onChange={(e) => onSmallerChange(e.target.checked)} />
-            <span>
-              Include smaller groups from these players
-              {smallerGroups > 0 && !smaller && (
-                <span className="muted">
-                  {" "}
-                  · {fmt.format(smallerGroups)} {smallerGroups === 1 ? "group has" : "groups have"} works
-                </span>
-              )}
-            </span>
-          </label>
-          {smaller && (
-            <>
-              <select value={minPlayers} onChange={(e) => set({ minPlayers: Number(e.target.value), within: "" })} aria-label="Smallest group">
-                {Array.from({ length: Math.max(1, players - 1) }, (_, i) => i + 1).map((n) => (
-                  <option key={n} value={n}>
-                    {n === 1 ? "Solos and up" : `${n}+ players`}
-                  </option>
-                ))}
-              </select>
-              <select value={within} onChange={(e) => set({ within: e.target.value })} aria-label="Group">
-                <option value="">All groups{f?.lineups.length ? ` (${f.lineups.length})` : ""}</option>
-                {(f?.lineups ?? []).map((l) => (
-                  <option key={l.key} value={l.key}>
-                    {l.description} ({fmt.format(l.count)})
-                  </option>
-                ))}
-              </select>
-            </>
-          )}
-        </div>
-      )}
-
-      {withOrchestra && (
-        <div className="orchestra-row">
-          <div className="orchestra-field">
-            <span className="orchestra-label">
-              <label htmlFor="orchestra">Your orchestra</label>
-              <InfoTip label="How to write an orchestra">
-                {(close) => (
-                  <>
-                    Winds and brass as players per section: <strong>flutes.oboes.clarinets.bassoons</strong>, then{" "}
-                    <strong>horns.trumpets.trombones.tuba</strong>. Then the rest: timp, perc, hp, cel, pf, org, hpd, str (strings), with a
-                    number for more than one (2hp, 3perc). A piccolo, English horn and the like go after their section with +: 3+picc.
-                    <span className="orchestra-examples">
-                      {EXAMPLES.map(([label, scoring]) => (
-                        <button
-                          key={label}
-                          type="button"
-                          className="orchestra-example"
-                          onClick={() => {
-                            onOrchestraChange(scoring);
-                            close();
-                          }}
-                        >
-                          <span>{label}</span> <code>{scoring}</code>
-                        </button>
-                      ))}
-                    </span>
-                  </>
-                )}
-              </InfoTip>
-            </span>
-            <input
-              id="orchestra"
-              aria-invalid={!!unreadable}
-              aria-describedby="orchestra-hint"
-              value={orchestra}
-              onChange={(e) => onOrchestraChange(e.target.value)}
-              placeholder="e.g. 2.2.2.2 4.2.3.1 timp str"
-              spellCheck={false}
-              autoCapitalize="off"
-              autoComplete="off"
-            />
-          </div>
-          <select value={exact ? "exact" : "within"} onChange={(e) => onExactChange(e.target.value === "exact")} aria-label="Match">
-            <option value="within">What it can play</option>
-            <option value="exact">Scored exactly so</option>
-          </select>
-          {/* Always there, two lines tall, so typing doesn't move the page */}
-          <p id="orchestra-hint" className={`orchestra-hint${unreadable ? " invalid" : ""}`} aria-live="polite">
-            {unreadable ? (
-              <>
-                <strong>Couldn't read “{unreadable}”.</strong> Write it like{" "}
-                <button type="button" className="link-button" onClick={() => onOrchestraChange(EXAMPLES[1]![1])}>
-                  <code>{EXAMPLES[1]![1]}</code>
-                </button>
-                ; the ? above explains how.
-              </>
-            ) : ours ? (
-              <>
-                {describeOrchestration(ours)}.
-                {unscored > 0 && (
-                  <span className="muted">
-                    {" "}
-                    Leaves out {fmt.format(unscored)} orchestral {unscored === 1 ? "work" : "works"} whose scoring we don't know.
-                  </span>
-                )}
-              </>
-            ) : (
-              <>
-                Write it like{" "}
-                <button type="button" className="link-button" onClick={() => onOrchestraChange(EXAMPLES[1]![1])}>
-                  <code>{EXAMPLES[1]![1]}</code>
-                </button>{" "}
-                to see what it can play; the ? explains how.
-              </>
-            )}
-          </p>
-        </div>
-      )}
-
-      <div className="filters">
-        <div className="era-chips" role="group" aria-label="Show">
-          {(
-            [
-              ["all", "All", null],
-              ["core", "Core repertoire", f?.core],
-              ["free", "Free sheet music", f?.free],
-            ] as [Show, string, number | null | undefined][]
-          ).map(([value, label, n]) => (
-            <button key={value} className={`era-chip${show === value ? " active" : ""}`} aria-pressed={show === value} onClick={() => set({ show: value })}>
-              {label} {n !== null && n !== undefined && <span className="era-count">{fmt.format(n)}</span>}
-            </button>
-          ))}
-          <span className="chip-sep" />
-          {eraOptions.map((e) => (
-            <button key={e} className={`era-chip${eras.includes(e) ? " active" : ""}`} aria-pressed={eras.includes(e)} onClick={() => toggleEra(e)}>
-              {e} <span className="era-count">{fmt.format(f?.eras[e as keyof typeof f.eras] ?? 0)}</span>
-            </button>
-          ))}
-        </div>
-        <div className="filter-row">
-          <select value={composer} onChange={(e) => set({ composer: e.target.value })} aria-label="Composer">
-            <option value="">All composers{f ? ` (${fmt.format(f.composers.length)}${f.composers.length === 300 ? "+" : ""})` : ""}</option>
-            {(f?.composers ?? []).map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.count})
-              </option>
-            ))}
-          </select>
-          <select value={length} onChange={(e) => set({ length: e.target.value })} aria-label="Length">
-            <option value="">Any length</option>
-            {LENGTHS.map((l, i) => (
-              <option key={l.label} value={lengthKey(l)}>
-                {l.label}
-                {f ? ` (${fmt.format(f.lengths.known[i] ?? 0)})` : ""}
-              </option>
-            ))}
-            <option value="unknown">Length unknown{f ? ` (${fmt.format(f.lengths.unknown)})` : ""}</option>
-          </select>
-          <SortSelect
-            sorting={sorting}
-            onChange={(s) => set({ sort: s.sort, order: s.order })}
-            sorts={smaller && !within ? ["players", "rank", "chronological", "duration", "composer", "title"] : ["rank", "chronological", "duration", "composer", "title"]}
-          />
-        </div>
       </div>
 
       <div className={loading && works.length ? "works-wrap stale" : "works-wrap"}>

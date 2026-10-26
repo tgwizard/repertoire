@@ -105,6 +105,10 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
     }).length;
   }, [index, settledKey, includeArr]);
 
+  // Listing a line-up, the search sits with the filters (in Results); otherwise on its own.
+  const listing = !!settledKey && Object.keys(ensemble).length > 0 && (count(ensemble) > 0 || smaller);
+  const search = <SearchField id="search" value={query} onChange={setQuery} narrowed={Object.keys(ensemble).length > 0} />;
+
   const main = () => {
     if (Object.keys(ensemble).length === 0) return q ? <SearchResults q={q} /> : <Intro meta={meta} />;
     if (count(ensemble) === 0 && !smaller) {
@@ -131,6 +135,7 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
         onSmallerChange={changeSmaller}
         smallerGroups={smallerGroups}
         q={q}
+        search={search}
         filters={filters}
         onFiltersChange={setFilters}
         orchestra={orchestra}
@@ -148,9 +153,12 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
       <aside className="sidebar">
         <EnsembleBuilder count={count} ensemble={ensemble} onChange={changeEnsemble} includeArr={includeArr} onIncludeArrChange={setIncludeArr} />
       </aside>
-      <div className="main-search">
-        <SearchField value={query} onChange={setQuery} narrowed={Object.keys(ensemble).length > 0} />
-      </div>
+      {/* The same box as the filters' (in Results), with only the search in it */}
+      {!listing && (
+        <div className="main-search">
+          <div className="filter-box">{search}</div>
+        </div>
+      )}
       <div className="main">{main()}</div>
     </div>
   );

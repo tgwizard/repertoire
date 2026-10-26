@@ -23,9 +23,10 @@ const OPTIONS: [WorkSort, SortOrder | undefined, string][] = [
 const value = (s: WorkSort, o?: SortOrder) => (o ? `${s}:${o}` : s);
 
 /** A sort select offering the given sorts, each in both directions where that reads naturally. */
-export function SortSelect({ sorting, onChange, sorts }: { sorting: Sorting; onChange: (s: Sorting) => void; sorts: WorkSort[] }) {
+export function SortSelect({ sorting, onChange, sorts, id }: { sorting: Sorting; onChange: (s: Sorting) => void; sorts: WorkSort[]; id?: string }) {
   return (
     <select
+      id={id}
       value={value(sorting.sort, sorting.order)}
       onChange={(e) => {
         const [sort, order] = e.target.value.split(":") as [WorkSort, SortOrder | undefined];

@@ -533,7 +533,7 @@ a.load-error-retry {
 }
 
 .results-head {
-  margin-bottom: 10px;
+  margin: 4px 0 12px;
 }
 
 .results-sub {
@@ -1400,4 +1400,130 @@ select:not([multiple]) {
 
 select:not([multiple]):hover {
   border-color: var(--muted);
+}
+
+/* ---- The filter box: search and everything that narrows the list, labelled like the
+   ensemble card ---- */
+
+.filter-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px 14px;
+  margin-bottom: 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+
+.filter-box .smaller-row,
+.filter-box .orchestra-row,
+.filter-box .filters {
+  margin: 0;
+}
+
+.filter-box .search-box {
+  max-width: none;
+}
+
+/* Text fields the size of the chips and selects */
+.filter-box .search-box input,
+.filter-box .orchestra-field input {
+  padding: 4px 14px;
+  border-radius: 999px;
+  font-size: 0.875rem;
+}
+
+.filter-box .orchestra-field input {
+  font-size: 0.85rem;
+}
+
+.filter-box .orchestra-row select {
+  padding: 4px 30px 4px 12px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  background-position: right 11px center;
+  background-size: 9px 6px;
+}
+
+.main-search .filter-box {
+  margin-bottom: 0;
+}
+
+/* Fields sit a step darker than the box */
+.filter-box input,
+.filter-box select,
+.filter-box .era-chip:not(.active) {
+  background-color: var(--bg);
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.filter-label {
+  font: 600 0.72rem/1 var(--sans);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Labels beside their controls */
+.filter-box .filters {
+  gap: 10px;
+}
+
+.filter-box .filters .filter-group {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.filter-box .filters .filter-label {
+  flex: none;
+  min-width: 3.2em;
+}
+
+/* Show and Era each on their own line: sharing one when they fit would make the box
+   jump as filters change how many eras there are */
+.filter-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.filter-box .filter-row {
+  gap: 10px 24px;
+}
+
+.filter-box .era-chips {
+  gap: 5px;
+}
+
+.filter-box .era-chip {
+  padding: 3px 10px;
+  font-size: 0.82rem;
+}
+
+/* Selects the size of the chips */
+.filter-box .filter-row select,
+.filter-box .smaller-row select {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px 30px 3px 10px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  background-position: right 11px center;
+  background-size: 9px 6px;
+}
+
+/* As wide as "All composers (300+)", not the longest name in it */
+.filter-box #filter-composer {
+  width: 210px;
+  max-width: 100%;
 }
