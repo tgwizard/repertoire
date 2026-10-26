@@ -868,6 +868,10 @@ code {
     grid-template-areas: "side" "search" "main";
   }
 
+  .layout.picked > .main-search {
+    margin-top: 20px;
+  }
+
   .layout > .main-search {
     margin-bottom: 16px;
   }
