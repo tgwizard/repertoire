@@ -170,9 +170,10 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
     base.push("s.lineup = w.lineup"); // one row per work: its main line-up
   }
   if (!q.arrangements) base.push("s.arrangement = 0");
-  // The composer facet lists every composer, whichever one is picked.
-  const anyComposer = [...base];
-  const anyComposerArgs = [...baseArgs];
+  // Listing a line-up, the composer facet lists every composer, whichever one is picked
+  // (a composer's own page, with no line-up, would group the whole dataset).
+  const anyComposer = q.lineup ? [...base] : base;
+  const anyComposerArgs = q.lineup ? [...baseArgs] : baseArgs;
   if (q.composer) {
     base.push("w.composer_id = ?");
     baseArgs.push(q.composer);

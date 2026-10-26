@@ -69,6 +69,9 @@ test("filters, sorts and pages", async () => {
   const one = await get<WorksPage>(`/api/works?lineup=${QUARTET}&facets=1&composer=${all.facets!.composers[0]!.id}`);
   assert.ok(one.total < all.total);
   assert.deepEqual(one.facets!.composers, all.facets!.composers);
+  // A composer's own list (no line-up) counts only them, not the whole dataset
+  const own = await get<WorksPage>(`/api/works?composer=${all.facets!.composers[0]!.id}&facets=1`);
+  assert.deepEqual(own.facets!.composers.map((c) => c.id), [all.facets!.composers[0]!.id]);
   const titleDesc = await get<WorksPage>(`/api/works?lineup=${QUARTET}&sort=title&order=desc`);
   assert.deepEqual(titleDesc.works.map((w) => w.title), byTitle.works.map((w) => w.title).reverse());
   const years = async (order: string) =>
