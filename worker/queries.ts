@@ -115,7 +115,10 @@ export function ftsQuery(input: string): string | null {
 const SUMMARY = `w.id, w.title, w.year, w.era, w.score, s.lineup, s.players, s.arrangement, w.duration, w.movements, o.scoring AS orchestration,
   c.id AS cid, c.name AS cname, c.born AS cborn, c.died AS cdied,
   (SELECT url FROM links WHERE entity = 'work' AND entity_id = w.id AND kind = 'score' ORDER BY provider != 'imslp' LIMIT 1) AS score_url`;
-const FROM = "FROM scorings s JOIN works w ON w.id = s.work_id LEFT JOIN composers c ON c.id = w.composer_id LEFT JOIN orchestrations o ON o.work_id = w.id";
+// The orchestrations join only where it's used (the listed page, an orchestra's filter):
+// counting a large line-up, every joined row costs.
+const CORE = "FROM scorings s JOIN works w ON w.id = s.work_id LEFT JOIN composers c ON c.id = w.composer_id";
+const FROM = `${CORE} LEFT JOIN orchestrations o ON o.work_id = w.id`;
 
 function toSummary(r: Row): WorkSummary {
   return {
@@ -226,19 +229,19 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
     : `SELECT ${SUMMARY} ${FROM} ${cond(where)}`;
   const stmts = [
     db.prepare(`${select} ORDER BY ${orderBy(dir)} LIMIT ? OFFSET ?`).bind(...args, limit, offset),
-    db.prepare(`SELECT COUNT(DISTINCT s.work_id) AS n ${FROM} ${cond(where)}`).bind(...args),
+    db.prepare(`SELECT COUNT(DISTINCT s.work_id) AS n ${q.orchestra ? FROM : CORE} ${cond(where)}`).bind(...args),
   ];
   if (q.facets) {
     stmts.push(
-      db.prepare(`SELECT w.era AS era, COUNT(DISTINCT w.id) AS n ${FROM} ${cond(base)} GROUP BY w.era`).bind(...baseArgs),
+      db.prepare(`SELECT w.era AS era, COUNT(DISTINCT w.id) AS n ${CORE} ${cond(base)} GROUP BY w.era`).bind(...baseArgs),
       db
-        .prepare(`SELECT c.id AS id, c.name AS name, COUNT(DISTINCT w.id) AS n ${FROM} ${cond([...anyComposer, "c.id IS NOT NULL"])} GROUP BY c.id ORDER BY n DESC, c.sort_name LIMIT 300`)
+        .prepare(`SELECT c.id AS id, c.name AS name, COUNT(DISTINCT w.id) AS n ${CORE} ${cond([...anyComposer, "c.id IS NOT NULL"])} GROUP BY c.id ORDER BY n DESC, c.sort_name LIMIT 300`)
         .bind(...anyComposerArgs),
       db
         .prepare(
           `SELECT SUM(score >= ${CORE_SCORE}) AS core, SUM(free) AS free, SUM(duration IS NULL) AS unknown_length,
            ${LENGTHS.map((l, i) => `SUM(duration >= ${l.min * 60}${l.max ? ` AND duration < ${l.max * 60}` : ""}) AS length_${i}`).join(", ")}
-           FROM (SELECT DISTINCT w.id, w.score, w.free, w.duration ${FROM} ${cond(base)})`,
+           FROM (SELECT DISTINCT w.id, w.score, w.free, w.duration ${CORE} ${cond(base)})`,
         )
         .bind(...baseArgs),
     );
