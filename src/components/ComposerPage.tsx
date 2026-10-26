@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { lifespan, useApi, type ComposerDetail } from "../lib/api";
+import { readFilters } from "../lib/filters";
 import { useWorks } from "../lib/useWorks";
-import { PROVIDERS, type WorkSort } from "../shared/data";
+import { PROVIDERS } from "../shared/data";
+import { setSortParams, SortSelect, type Sorting } from "./SortSelect";
+import { LoadError } from "./LoadError";
 import { WorkList } from "./WorkList";
 
 const fmt = new Intl.NumberFormat("en");
@@ -10,7 +13,10 @@ const LINEUPS_SHOWN = 12;
 export function ComposerPage({ id }: { id: string }) {
   const { data: c, error } = useApi<ComposerDetail>(`/api/composers/${id}`);
   const [lineup, setLineup] = useState(() => new URLSearchParams(location.search).get("lineup") ?? "");
-  const [sort, setSort] = useState<WorkSort>("rank");
+  const [sorting, setSorting] = useState<Sorting>(() => {
+    const { sort, order } = readFilters(new URLSearchParams(location.search), false);
+    return { sort, order };
+  });
   const [allLineups, setAllLineups] = useState(false);
 
   useEffect(() => {
@@ -20,17 +26,20 @@ export function ComposerPage({ id }: { id: string }) {
     const url = new URL(location.href);
     if (lineup) url.searchParams.set("lineup", lineup);
     else url.searchParams.delete("lineup");
+    url.searchParams.delete("sort");
+    url.searchParams.delete("order");
+    setSortParams(url.searchParams, sorting);
     history.replaceState(null, "", url.pathname + url.search.replaceAll("%2C", ","));
-  }, [lineup]);
+  }, [lineup, sorting]);
 
   const query = useMemo(() => {
     // Arrangements too: some works survive on IMSLP only in arrangements.
     const p = new URLSearchParams({ composer: id, arrangements: "1" });
     if (lineup) p.set("lineup", lineup);
-    if (sort !== "rank") p.set("sort", sort);
+    setSortParams(p, sorting);
     return p.toString().replaceAll("%2C", ",");
-  }, [id, lineup, sort]);
-  const { works, total, loading, hasMore, loadMore } = useWorks(c ? query : null);
+  }, [id, lineup, sorting]);
+  const { works, total, loading, error: worksError, hasMore, loadMore, retry } = useWorks(c ? query : null);
 
   if (error) return <div className="notice error">{"status" in error && error.status === 404 ? "No such composer." : `Couldn't load this composer: ${error.message}`}</div>;
   if (!c || c.id !== id) {
@@ -91,13 +100,10 @@ export function ComposerPage({ id }: { id: string }) {
           <h2>
             {fmt.format(total)} <span className="muted">{total === 1 ? "work" : "works"}</span>
           </h2>
-          <select value={sort} onChange={(e) => setSort(e.target.value as WorkSort)} aria-label="Sort">
-            <option value="rank">Most established first</option>
-            <option value="chronological">Chronological</option>
-            <option value="title">By title</option>
-          </select>
+          <SortSelect sorting={sorting} onChange={setSorting} sorts={["rank", "chronological", "duration", "title"]} />
         </div>
         <WorkList works={works} lineup={lineup || undefined} showLineup={!lineup} />
+        {worksError && <LoadError what="the works" message={worksError} onRetry={retry} />}
         {hasMore && (
           <button className="more" onClick={loadMore} disabled={loading}>
             {loading ? "Loading…" : `Load more (${fmt.format(total - works.length)} left)`}

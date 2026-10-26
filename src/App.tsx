@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { AboutPage } from "./components/AboutPage";
 import { ComposerPage } from "./components/ComposerPage";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FinderPage } from "./components/FinderPage";
 import { Footer } from "./components/Footer";
 import { WorkPage } from "./components/WorkPage";
@@ -45,19 +46,21 @@ export function App() {
         <SiteTitle as={route.name === "finder" ? "h1" : "p"} />
       </header>
 
-      {error ? (
-        <div className="notice error">Couldn't load the repertoire: {error.message}.</div>
-      ) : !index ? (
-        <div className="notice">
-          <span className="spinner" /> Loading the repertoire…
-        </div>
-      ) : (
-        <FinderPage index={index} meta={meta} active={route.name === "finder"} navigation={loc.n} />
-      )}
-      {route.name === "work" && <WorkPage id={route.id} />}
-      {route.name === "composer" && <ComposerPage key={route.id} id={route.id} />}
-      {route.name === "about" && <AboutPage />}
-      {route.name === "notfound" && <div className="notice">There's no page here. Try the search above.</div>}
+      <ErrorBoundary resetKey={loc.n}>
+        {error ? (
+          <div className="notice error">Couldn't load the repertoire: {error.message}.</div>
+        ) : !index ? (
+          <div className="notice">
+            <span className="spinner" /> Loading the repertoire…
+          </div>
+        ) : (
+          <FinderPage index={index} meta={meta} active={route.name === "finder"} navigation={loc.n} />
+        )}
+        {route.name === "work" && <WorkPage id={route.id} />}
+        {route.name === "composer" && <ComposerPage key={route.id} id={route.id} />}
+        {route.name === "about" && <AboutPage />}
+        {route.name === "notfound" && <div className="notice">There's no page here. Try the search above.</div>}
+      </ErrorBoundary>
       <Footer meta={meta} />
     </div>
   );

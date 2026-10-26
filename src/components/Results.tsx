@@ -1,12 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useApi } from "../lib/api";
 import { describe, parseEnsembleKey, playerCount } from "../lib/instrumentation";
+import { describeOrchestration, EXAMPLES, formatOrchestration, hasOrchestra, readOrchestration } from "../lib/orchestration";
+import { lengthKey, type Filters, type Show } from "../lib/filters";
+import { useDebounced } from "../lib/useDebounced";
 import { useWorks } from "../lib/useWorks";
-import { ERAS, lineupSourceUrl, SOURCES, type SourceId, type WorkSort } from "../shared/data";
+import { ERAS, LENGTHS, lineupSourceUrl, SOURCES, type SourceId } from "../shared/data";
+import { setSortParams, SortSelect, type Sorting } from "./SortSelect";
+import { InfoTip } from "./InfoTip";
+import { LoadError } from "./LoadError";
 import { WorkList } from "./WorkList";
 
 const fmt = new Intl.NumberFormat("en");
-type Show = "all" | "core" | "free";
 const UNKNOWN = "Unknown";
 
 interface Props {
@@ -20,63 +25,73 @@ interface Props {
   smallerGroups: number;
   /** Search text from the finder's search box */
   q: string;
+  /** Filters and sort, kept in the URL */
+  filters: Filters;
+  onFiltersChange: (f: Filters) => void;
+  /** An orchestra's scoring as typed, for line-ups with an orchestra */
+  orchestra: string;
+  onOrchestraChange: (v: string) => void;
+  exact: boolean;
+  onExactChange: (v: boolean) => void;
   onSearchEverywhere: () => void;
 }
+
 
 interface LineupInfo {
   sources: Partial<Record<SourceId, string[]>>;
 }
 
-/** Where a line-up's definition comes from, as links to the source categories. */
+/** Where a line-up's definition comes from, as links to the source categories, behind a "?". */
 function LineupSources({ lineup }: { lineup: string }) {
   const { data } = useApi<LineupInfo>(`/api/lineups/${encodeURIComponent(lineup)}`);
   const entries = Object.entries(data?.sources ?? {}) as [SourceId, string[]][];
   if (!entries.length) return null;
   return (
-    <p className="lineup-sources">
-      Line-up from{" "}
-      {entries.map(([s, names], i) => (
-        <span key={s}>
-          {i > 0 && (i === entries.length - 1 ? " and " : ", ")}
-          <strong>{SOURCES[s].name}</strong>{" "}
-          <span className="muted">
-            (
-            {names.slice(0, 3).map((n, j) => {
-              const href = lineupSourceUrl(s, n);
-              return (
-                <span key={n}>
-                  {j > 0 && ", "}
-                  {href ? (
-                    <a href={href} target="_blank" rel="noreferrer">
-                      {n}
-                    </a>
-                  ) : (
-                    n
-                  )}
-                </span>
-              );
-            })}
-            {names.length > 3 && `, +${names.length - 3}`})
+    <InfoTip label="Where this line-up comes from">
+      <span className="lineup-sources">
+        Line-up from{" "}
+        {entries.map(([s, names], i) => (
+          <span key={s}>
+            {i > 0 && (i === entries.length - 1 ? " and " : ", ")}
+            <strong>{SOURCES[s].name}</strong>{" "}
+            <span className="muted">
+              (
+              {names.slice(0, 3).map((n, j) => {
+                const href = lineupSourceUrl(s, n);
+                return (
+                  <span key={n}>
+                    {j > 0 && ", "}
+                    {href ? (
+                      <a href={href} target="_blank" rel="noreferrer">
+                        {n}
+                      </a>
+                    ) : (
+                      n
+                    )}
+                  </span>
+                );
+              })}
+              {names.length > 3 && `, +${names.length - 3}`})
+            </span>
           </span>
-        </span>
-      ))}
-      .
-    </p>
+        ))}
+        .
+      </span>
+    </InfoTip>
   );
 }
 
-export function Results({ lineup, total, includeArr, smaller, onSmallerChange, smallerGroups, q, onSearchEverywhere }: Props) {
+export function Results({ lineup, total, includeArr, smaller, onSmallerChange, smallerGroups, q, filters, onFiltersChange, orchestra, onOrchestraChange, exact, onExactChange, onSearchEverywhere }: Props) {
   const players = playerCount(parseEnsembleKey(lineup));
-  const [eras, setEras] = useState<Set<string>>(new Set());
-  const [composer, setComposer] = useState("");
-  const [sort, setSort] = useState<WorkSort>("rank");
-  const [show, setShow] = useState<Show>("all");
-  const [minPlayers, setMinPlayers] = useState(2);
-  const [within, setWithin] = useState("");
-
-  // Switching to smaller groups: largest groups first reads best.
-  useEffect(() => setSort(smaller ? "players" : "rank"), [smaller]);
-  useEffect(() => setWithin(""), [smaller, minPlayers]);
+  const { eras, composer, show, minPlayers, within, length } = filters;
+  const sorting: Sorting = { sort: filters.sort, order: filters.order };
+  const set = (patch: Partial<Filters>) => onFiltersChange({ ...filters, ...patch });
+  const withOrchestra = hasOrchestra(lineup);
+  const typed = useDebounced(orchestra.trim(), 300);
+  const { orchestration: ours, unreadable } = useMemo(
+    () => (withOrchestra && typed ? readOrchestration(typed) : { orchestration: null, unreadable: null }),
+    [withOrchestra, typed],
+  );
 
   const params = useMemo(() => {
     const p = new URLSearchParams();
@@ -90,12 +105,21 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
     for (const e of [...eras].sort()) p.append("era", e);
     if (show !== "all") p.set("show", show);
     if (q) p.set("q", q);
-    if (sort !== "rank") p.set("sort", sort === "players" && (!smaller || within) ? "rank" : sort);
+    if (ours) p.set("orchestra", formatOrchestration(ours));
+    if (ours && exact) p.set("fit", "exact");
+    if (length === "unknown") p.set("duration", "unknown");
+    else if (length) {
+      const { min, max } = LENGTHS.find((l) => lengthKey(l) === length)!;
+      if (min) p.set("min_duration", String(min));
+      if (max) p.set("max_duration", String(max));
+    }
+    // Group sizes only vary with smaller groups.
+    setSortParams(p, sorting.sort === "players" && (!smaller || within) ? { sort: "rank" } : sorting);
     return p.toString().replaceAll("%2C", ",");
-  }, [lineup, within, smaller, minPlayers, includeArr, composer, eras, show, q, sort]);
+  }, [lineup, within, smaller, minPlayers, includeArr, composer, eras, show, q, ours, exact, length, sorting.sort, sorting.order]);
 
-  const { works, total: matching, facets, loading, error, hasMore, loadMore } = useWorks(params);
-  const filtering = q !== "" || eras.size > 0 || composer !== "" || show !== "all";
+  const { works, total: matching, facets, unscored, loading, error, hasMore, loadMore, retry } = useWorks(params);
+  const filtering = q !== "" || eras.length > 0 || composer !== "" || show !== "all" || !!ours || length !== "";
   // Facets describe the unfiltered list; keep the last ones while a new query loads.
   const lastFacets = useRef(facets);
   if (facets) lastFacets.current = facets;
@@ -108,13 +132,7 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
     if (el && el.getBoundingClientRect().top < 0) el.scrollIntoView({ behavior: "smooth" });
   }, []);
 
-  const toggleEra = (e: string) =>
-    setEras((prev) => {
-      const next = new Set(prev);
-      if (next.has(e)) next.delete(e);
-      else next.add(e);
-      return next;
-    });
+  const toggleEra = (e: string) => set({ eras: eras.includes(e) ? eras.filter((x) => x !== e) : [...eras, e].sort() });
 
   const eraOptions = [...ERAS, UNKNOWN].filter((e) => f?.eras[e as keyof typeof f.eras]);
   const description = describe(parseEnsembleKey(lineup));
@@ -136,19 +154,20 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
               </span>
             </>
           )}
+          {!smaller && <LineupSources lineup={lineup} />}
         </h2>
-        <p className="results-sub">
-          {filtering ? `For ${description}${smaller ? " and smaller groups" : ""}. ` : smaller ? "Largest groups first. " : "Most established first. "}
-          {q && (
-            <button className="link-button" onClick={onSearchEverywhere}>
-              Search all line-ups instead
-            </button>
-          )}
-          {error && <span className="error-text"> {error}</span>}
-        </p>
+        {filtering && (
+          <p className="results-sub">
+            For {description}
+            {smaller ? " and smaller groups" : ""}.{" "}
+            {q && (
+              <button className="link-button" onClick={onSearchEverywhere}>
+                Search all line-ups instead
+              </button>
+            )}
+          </p>
+        )}
       </div>
-      {!smaller && <LineupSources lineup={lineup} />}
-
       {players > 1 && (
         <div className="smaller-row">
           <label className="toggle">
@@ -165,14 +184,14 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
           </label>
           {smaller && (
             <>
-              <select value={minPlayers} onChange={(e) => setMinPlayers(Number(e.target.value))} aria-label="Smallest group">
+              <select value={minPlayers} onChange={(e) => set({ minPlayers: Number(e.target.value), within: "" })} aria-label="Smallest group">
                 {Array.from({ length: Math.max(1, players - 1) }, (_, i) => i + 1).map((n) => (
                   <option key={n} value={n}>
                     {n === 1 ? "Solos and up" : `${n}+ players`}
                   </option>
                 ))}
               </select>
-              <select value={within} onChange={(e) => setWithin(e.target.value)} aria-label="Group">
+              <select value={within} onChange={(e) => set({ within: e.target.value })} aria-label="Group">
                 <option value="">All groups{f?.lineups.length ? ` (${f.lineups.length})` : ""}</option>
                 {(f?.lineups ?? []).map((l) => (
                   <option key={l.key} value={l.key}>
@@ -181,6 +200,76 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
                 ))}
               </select>
             </>
+          )}
+        </div>
+      )}
+
+      {withOrchestra && (
+        <div className="orchestra-row">
+          <div className="orchestra-field">
+            <span className="orchestra-label">
+              <label htmlFor="orchestra">Your orchestra</label>
+              <InfoTip label="How to write an orchestra">
+                {(close) => (
+                  <>
+                    Winds and brass as players per section: <strong>flutes.oboes.clarinets.bassoons</strong>, then{" "}
+                    <strong>horns.trumpets.trombones.tuba</strong>. Then the rest: timp, perc, hp, cel, pf, org, hpd, str (strings), with a
+                    number for more than one (2hp, 3perc). A piccolo, English horn and the like go after their section with +: 3+picc.
+                    <span className="orchestra-examples">
+                      {EXAMPLES.map(([label, scoring]) => (
+                        <button
+                          key={label}
+                          type="button"
+                          className="orchestra-example"
+                          onClick={() => {
+                            onOrchestraChange(scoring);
+                            close();
+                          }}
+                        >
+                          <span>{label}</span> <code>{scoring}</code>
+                        </button>
+                      ))}
+                    </span>
+                  </>
+                )}
+              </InfoTip>
+            </span>
+            <input
+              id="orchestra"
+              aria-invalid={!!unreadable}
+              aria-describedby="orchestra-hint"
+              value={orchestra}
+              onChange={(e) => onOrchestraChange(e.target.value)}
+              placeholder="e.g. 2.2.2.2 4.2.3.1 timp str"
+              spellCheck={false}
+              autoCapitalize="off"
+              autoComplete="off"
+            />
+          </div>
+          <select value={exact ? "exact" : "within"} onChange={(e) => onExactChange(e.target.value === "exact")} aria-label="Match">
+            <option value="within">What it can play</option>
+            <option value="exact">Scored exactly so</option>
+          </select>
+          {unreadable ? (
+            <p id="orchestra-hint" className="orchestra-hint invalid" role="alert">
+              <strong>Couldn't read “{unreadable}”.</strong> Write it like{" "}
+              <button type="button" className="link-button" onClick={() => onOrchestraChange(EXAMPLES[1]![1])}>
+                <code>{EXAMPLES[1]![1]}</code>
+              </button>
+              ; the ? above explains how.
+            </p>
+          ) : (
+            ours && (
+              <p id="orchestra-hint" className="orchestra-hint">
+                {describeOrchestration(ours)}.
+                {unscored > 0 && (
+                  <span className="muted">
+                    {" "}
+                    Leaves out {fmt.format(unscored)} orchestral {unscored === 1 ? "work" : "works"} whose scoring we don't know.
+                  </span>
+                )}
+              </p>
+            )
           )}
         </div>
       )}
@@ -194,19 +283,19 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
               ["free", "Free sheet music", f?.free],
             ] as [Show, string, number | null | undefined][]
           ).map(([value, label, n]) => (
-            <button key={value} className={`era-chip${show === value ? " active" : ""}`} aria-pressed={show === value} onClick={() => setShow(value)}>
+            <button key={value} className={`era-chip${show === value ? " active" : ""}`} aria-pressed={show === value} onClick={() => set({ show: value })}>
               {label} {n !== null && n !== undefined && <span className="era-count">{fmt.format(n)}</span>}
             </button>
           ))}
           <span className="chip-sep" />
           {eraOptions.map((e) => (
-            <button key={e} className={`era-chip${eras.has(e) ? " active" : ""}`} aria-pressed={eras.has(e)} onClick={() => toggleEra(e)}>
+            <button key={e} className={`era-chip${eras.includes(e) ? " active" : ""}`} aria-pressed={eras.includes(e)} onClick={() => toggleEra(e)}>
               {e} <span className="era-count">{fmt.format(f?.eras[e as keyof typeof f.eras] ?? 0)}</span>
             </button>
           ))}
         </div>
         <div className="filter-row">
-          <select value={composer} onChange={(e) => setComposer(e.target.value)} aria-label="Composer">
+          <select value={composer} onChange={(e) => set({ composer: e.target.value })} aria-label="Composer">
             <option value="">All composers{f ? ` (${fmt.format(f.composers.length)}${f.composers.length === 300 ? "+" : ""})` : ""}</option>
             {(f?.composers ?? []).map((c) => (
               <option key={c.id} value={c.id}>
@@ -214,18 +303,26 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
               </option>
             ))}
           </select>
-          <select value={sort} onChange={(e) => setSort(e.target.value as WorkSort)} aria-label="Sort">
-            {smaller && !within && <option value="players">Largest groups first</option>}
-            <option value="rank">Most established first</option>
-            <option value="chronological">Chronological</option>
-            <option value="composer">By composer</option>
-            <option value="title">By title</option>
+          <select value={length} onChange={(e) => set({ length: e.target.value })} aria-label="Length">
+            <option value="">Any length</option>
+            {LENGTHS.map((l, i) => (
+              <option key={l.label} value={lengthKey(l)}>
+                {l.label}
+                {f ? ` (${fmt.format(f.lengths.known[i] ?? 0)})` : ""}
+              </option>
+            ))}
+            <option value="unknown">Length unknown{f ? ` (${fmt.format(f.lengths.unknown)})` : ""}</option>
           </select>
+          <SortSelect
+            sorting={sorting}
+            onChange={(s) => set({ sort: s.sort, order: s.order })}
+            sorts={smaller && !within ? ["players", "rank", "chronological", "duration", "composer", "title"] : ["rank", "chronological", "duration", "composer", "title"]}
+          />
         </div>
       </div>
 
       <div className={loading && works.length ? "works-wrap stale" : "works-wrap"}>
-        <WorkList works={works} lineup={lineup} onComposer={setComposer} groupByPlayers={smaller && !within && sort === "players" ? players : undefined} />
+        <WorkList works={works} lineup={lineup} onComposer={(id) => set({ composer: id })} groupByPlayers={smaller && !within && sorting.sort === "players" ? players : undefined} />
       </div>
       {loading && !works.length && (
         <p className="muted">
@@ -237,7 +334,8 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
           {loading ? "Loading…" : `Load more (${fmt.format(matching - works.length)} left)`}
         </button>
       )}
-      {!loading && works.length === 0 && <p className="muted">No works match these filters.</p>}
+      {error && <LoadError what="the works" message={error} onRetry={retry} />}
+      {!loading && !error && works.length === 0 && <p className="muted">No works match these filters.</p>}
     </section>
   );
 }

@@ -84,6 +84,23 @@ export function AboutPage() {
                   <dt>Only as arrangements</dt>
                   <dd>{n(s.arrangementOnly)}</dd>
                 </div>
+                {s.orchestrations && (
+                  <div>
+                    <dt>Orchestral works with a known scoring</dt>
+                    <dd>
+                      {n(Object.values(s.orchestrations).reduce((a, b) => a + b, 0))}{" "}
+                      <span className="muted small">
+                        {(Object.entries(s.orchestrations) as [SourceId, number][]).map(([src, k]) => `${n(k)} from ${SOURCES[src].name}`).join(", ")}
+                      </span>
+                    </dd>
+                  </div>
+                )}
+                {s.durations !== undefined && (
+                  <div>
+                    <dt>With a duration</dt>
+                    <dd>{n(s.durations)}</dd>
+                  </div>
+                )}
               </>
             )}
           </dl>

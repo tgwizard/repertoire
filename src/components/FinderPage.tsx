@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { decodeEnsemble, describe, encodeEnsemble, ensembleKey, fitsIn, parseEnsembleKey, playerCount, type Ensemble } from "../lib/instrumentation";
+import { defaultFilters, readFilters, writeFilters, type Filters } from "../lib/filters";
 import { useDebounced } from "../lib/useDebounced";
 import type { LineupsIndex, Meta } from "../shared/data";
 import { Intro, NoMatches } from "./EmptyState";
@@ -7,10 +8,20 @@ import { EnsembleBuilder } from "./EnsembleBuilder";
 import { Results } from "./Results";
 import { SearchField, SearchResults } from "./Search";
 import { navigate } from "../lib/router";
+import { hasOrchestra } from "../lib/orchestration";
 
 function readUrl() {
   const p = new URLSearchParams(location.search);
-  return { ensemble: decodeEnsemble(p.get("i")), includeArr: p.get("arr") === "1", smaller: p.get("sub") === "1", q: p.get("q") ?? "" };
+  const smaller = p.get("sub") === "1";
+  return {
+    ensemble: decodeEnsemble(p.get("i")),
+    includeArr: p.get("arr") === "1",
+    smaller,
+    filters: readFilters(p, smaller),
+    q: p.get("q") ?? "",
+    orchestra: p.get("orch") ?? "",
+    exact: p.get("fit") === "exact",
+  };
 }
 
 interface Props {
@@ -27,6 +38,20 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
   const [includeArr, setIncludeArr] = useState(() => readUrl().includeArr);
   const [smaller, setSmaller] = useState(() => readUrl().smaller);
   const [query, setQuery] = useState(() => readUrl().q);
+  // An orchestra's scoring as typed ("2.2.2.2 4.2.3.1 timp str"), and whether to match it exactly
+  const [orchestra, setOrchestra] = useState(() => readUrl().orchestra);
+  const [exact, setExact] = useState(() => readUrl().exact);
+  // Filters and sort on the works listed (start over with each new ensemble)
+  const [filters, setFilters] = useState<Filters>(() => readUrl().filters);
+  const changeEnsemble = (e: Ensemble) => {
+    setEnsemble(e);
+    setFilters(defaultFilters(smaller));
+  };
+  // Listing smaller groups too: largest first, all of them
+  const changeSmaller = (v: boolean) => {
+    setSmaller(v);
+    setFilters((f) => ({ ...f, sort: defaultFilters(v).sort, order: undefined, within: "" }));
+  };
   const q = useDebounced(query.trim(), 250);
 
   // Arriving at "/": the URL says what to show. A link from a work page names a
@@ -38,6 +63,9 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
     setIncludeArr(url.includeArr);
     setSmaller(url.smaller);
     setQuery(url.q);
+    setOrchestra(url.orchestra);
+    setExact(url.exact);
+    setFilters(url.filters);
   }, [active, navigation]);
 
   useEffect(() => {
@@ -47,11 +75,15 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
     if (enc) p.set("i", enc);
     if (includeArr) p.set("arr", "1");
     if (smaller && enc) p.set("sub", "1");
+    if (enc) writeFilters(p, filters, smaller);
     if (q) p.set("q", q);
+    const orch = hasOrchestra(ensembleKey(ensemble)) ? orchestra.trim() : "";
+    if (orch) p.set("orch", orch);
+    if (orch && exact) p.set("fit", "exact");
     const qs = p.toString().replaceAll("%2C", ",").replaceAll("%3A", ":");
     history.replaceState(null, "", qs ? `/?${qs}` : "/");
     document.title = [q && `“${q}”`, enc && describe(ensemble), "Repertoire Finder"].filter(Boolean).join(" · ");
-  }, [ensemble, includeArr, smaller, q, active]);
+  }, [ensemble, includeArr, smaller, q, orchestra, exact, filters, active]);
 
   const count = (e: Ensemble) => {
     const entry = index.lineups[ensembleKey(e)];
@@ -82,9 +114,9 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
           count={count}
           arrangements={index.lineups[ensembleKey(ensemble)]?.[1] ?? 0}
           smallerGroups={smallerGroups}
-          onChange={setEnsemble}
+          onChange={changeEnsemble}
           onIncludeArr={() => setIncludeArr(true)}
-          onSmaller={() => setSmaller(true)}
+          onSmaller={() => changeSmaller(true)}
         />
       );
     }
@@ -96,9 +128,15 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
         total={count(settled)}
         includeArr={includeArr}
         smaller={smaller}
-        onSmallerChange={setSmaller}
+        onSmallerChange={changeSmaller}
         smallerGroups={smallerGroups}
         q={q}
+        filters={filters}
+        onFiltersChange={setFilters}
+        orchestra={orchestra}
+        onOrchestraChange={setOrchestra}
+        exact={exact}
+        onExactChange={setExact}
         // A new history entry, so going back returns to the line-up.
         onSearchEverywhere={() => navigate(`/?q=${encodeURIComponent(q)}`)}
       />
@@ -108,7 +146,7 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
   return (
     <div className="layout" hidden={!active}>
       <aside className="sidebar">
-        <EnsembleBuilder count={count} ensemble={ensemble} onChange={setEnsemble} includeArr={includeArr} onIncludeArrChange={setIncludeArr} />
+        <EnsembleBuilder count={count} ensemble={ensemble} onChange={changeEnsemble} includeArr={includeArr} onIncludeArrChange={setIncludeArr} />
       </aside>
       <div className="main-search">
         <SearchField value={query} onChange={setQuery} narrowed={Object.keys(ensemble).length > 0} />

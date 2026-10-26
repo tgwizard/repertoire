@@ -9,6 +9,8 @@ interface State {
   works: WorkSummary[];
   total: number;
   facets: Facets | null;
+  /** Orchestral works left out for want of a known scoring */
+  unscored: number;
   loading: boolean;
   error: string | null;
 }
@@ -19,8 +21,9 @@ interface State {
  * keeping the old list on screen until the new one arrives.
  */
 export function useWorks(query: string | null, endpoint = "/api/works") {
-  const [state, setState] = useState<State>({ works: [], total: 0, facets: null, loading: !!query, error: null });
+  const [state, setState] = useState<State>({ works: [], total: 0, facets: null, unscored: 0, loading: !!query, error: null });
   const [pages, setPages] = useState(1);
+  const [attempt, setAttempt] = useState(0);
   const current = useRef(query);
 
   useEffect(() => {
@@ -40,6 +43,7 @@ export function useWorks(query: string | null, endpoint = "/api/works") {
           works: results.flatMap((r) => r.works),
           total: results[0]!.total,
           facets: results[0]!.facets ?? null,
+          unscored: results[0]!.unscored ?? 0,
           loading: false,
           error: null,
         });
@@ -49,8 +53,9 @@ export function useWorks(query: string | null, endpoint = "/api/works") {
     return () => {
       cancelled = true;
     };
-  }, [query, pages, endpoint]);
+  }, [query, pages, endpoint, attempt]);
 
   const loadMore = useCallback(() => setPages((p) => p + 1), []);
-  return { ...state, hasMore: state.works.length < state.total, loadMore };
+  const retry = useCallback(() => setAttempt((a) => a + 1), []);
+  return { ...state, hasMore: !state.error && state.works.length < state.total, loadMore, retry };
 }

@@ -3,6 +3,7 @@
   --surface: #fffcf6;
   --ink: #1f1b16;
   --muted: #6e665b;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1.5 1.5 6 6l4.5-4.5' fill='none' stroke='%236e665b' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --line: #e2d9ca;
   --accent: #8c2f1f;
   --accent-soft: #f3e1d9;
@@ -28,6 +29,7 @@
     --surface: #1d1a16;
     --ink: #eee7db;
     --muted: #a39a8c;
+    --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1.5 1.5 6 6l4.5-4.5' fill='none' stroke='%23a39a8c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
     --line: #36312a;
     --accent: #e8896f;
     --accent-soft: #3a2620;
@@ -147,9 +149,59 @@ button:disabled {
   color: var(--muted);
 }
 
-.notice.error,
 .error-text {
   color: var(--accent);
+}
+
+.notice.error {
+  color: var(--ink);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.load-error {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+
+.load-error-retry {
+  padding: 8px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: var(--surface);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+a.load-error-retry {
+  display: inline-block;
+  text-decoration: none;
+}
+
+.crash {
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.crash p {
+  margin: 0 0 8px;
+}
+
+.crash details {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.crash-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.load-error-retry:hover {
+  background: var(--accent);
+  color: var(--surface);
 }
 
 .spinner {
@@ -634,10 +686,67 @@ button:disabled {
   border-color: var(--muted);
 }
 
-.lineup-sources {
-  margin: -6px 0 16px;
-  font-size: 0.85rem;
+/* ---- A "?" with an explanation that opens on hover or click ---- */
+
+.results-head {
+  position: relative;
+}
+
+.info {
+  margin-left: 8px;
+}
+
+.info-button {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--surface);
   color: var(--muted);
+  font: 600 0.75rem/1 var(--sans);
+  vertical-align: 3px;
+  cursor: pointer;
+}
+
+.info-button:hover,
+.info.open .info-button {
+  border-color: var(--muted);
+  color: var(--ink);
+}
+
+/* Spans the results column, under the heading. Closing waits a moment, so the pointer
+   can cross from the "?" to the links. */
+.info-popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-width: 640px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  font: 400 0.85rem/1.5 var(--sans);
+  color: var(--muted);
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity 0.12s,
+    visibility 0s linear 0.3s;
+}
+
+.results-head .info-popover .muted {
+  font: inherit;
+}
+
+.info:hover .info-popover,
+.info.open .info-popover {
+  visibility: visible;
+  opacity: 1;
+  transition-delay: 0s;
 }
 
 .lineup-sources strong {
@@ -813,7 +922,7 @@ code {
   font-size: 1.02rem;
   padding: 11px 16px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 12px;
   background: var(--surface);
   color: var(--ink);
 }
@@ -859,6 +968,114 @@ code {
   border-top: 1px solid var(--line);
   border-radius: 0 0 8px 8px;
   margin-top: 4px;
+}
+
+/* ---- An orchestra's scoring ---- */
+
+.orchestra-row {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+  margin: 0 0 16px;
+}
+
+.orchestra-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 260px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.orchestra-field input,
+.orchestra-row select {
+  font: inherit;
+  color: var(--ink);
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  min-width: 0;
+}
+
+.orchestra-field input {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.95rem;
+}
+
+.orchestra-label {
+  display: flex;
+  align-items: center;
+}
+
+.orchestra-label .info {
+  margin-left: 6px;
+}
+
+.orchestra-field input[aria-invalid="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.orchestra-hint {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.orchestra-hint.invalid {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-size: 0.875rem;
+}
+
+.orchestra-hint code,
+.orchestra-example code {
+  font: 0.85em ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.orchestra-examples {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.orchestra-example {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  text-align: left;
+}
+
+.orchestra-example span {
+  min-width: 5.5em;
+  font-weight: 500;
+}
+
+.orchestra-example:hover {
+  border-color: var(--muted);
+}
+
+.orchestration-tag {
+  font: 0.8rem/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--muted);
+  margin-right: 6px;
+}
+
+.orchestration p {
+  margin: 8px 0 0;
 }
 
 /* ---- Smaller groups ---- */
@@ -1151,4 +1368,21 @@ code {
   columns: 2 260px;
   padding-left: 22px;
   margin: 0;
+}
+
+/* ---- Selects: one chevron everywhere, in the theme's colors, with room around it ---- */
+
+select:not([multiple]) {
+  appearance: none;
+  padding-right: 36px;
+  background-image: var(--chevron);
+  background-position: right 14px center;
+  background-size: 12px 8px;
+  background-repeat: no-repeat;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+select:not([multiple]):hover {
+  border-color: var(--muted);
 }

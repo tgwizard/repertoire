@@ -11,6 +11,7 @@ import { buildDataset, DATASET_PATH } from "./build.ts";
 import { writeExports } from "./export.ts";
 import { collectGarbage, readStage } from "./http.ts";
 import { crawlComposerEras, crawlImslp, type ImslpStage } from "./sources/imslp.ts";
+import { crawlImslpPages } from "./sources/imslp-pages.ts";
 import { crawlMusicBrainz } from "./sources/musicbrainz.ts";
 import { crawlGnd } from "./sources/gnd.ts";
 import { crawlLibris } from "./sources/libris.ts";
@@ -20,7 +21,7 @@ import { crawlOpenOpus } from "./sources/openopus.ts";
 import { crawlWikidata, type WikidataStage } from "./sources/wikidata.ts";
 import { crawlWikipedia } from "./sources/wikipedia.ts";
 
-const STAGES = ["imslp", "wikipedia", "wikidata", "openopus", "composers", "musicbrainz", "mutopia", "libris", "gnd", "rism", "build"] as const;
+const STAGES = ["imslp", "imslp-pages", "wikipedia", "wikidata", "openopus", "composers", "musicbrainz", "mutopia", "libris", "gnd", "rism", "build"] as const;
 type Stage = (typeof STAGES)[number];
 
 const { values, positionals } = parseArgs({
@@ -71,6 +72,7 @@ for (const stage of STAGES) {
   const t = Date.now();
   try {
     if (stage === "imslp") await crawlImslp({ minWorks: Number(values["min-works"]) });
+    if (stage === "imslp-pages") await crawlImslpPages();
     if (stage === "wikipedia") await crawlWikipedia();
     if (stage === "wikidata") await crawlWikidata();
     if (stage === "openopus") await crawlOpenOpus();

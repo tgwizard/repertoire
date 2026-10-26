@@ -8,12 +8,19 @@ import { datasetVersion, handleApi } from "./api.ts";
 import { renderPage } from "./pages.ts";
 
 declare const __BUILD_ID__: string;
+declare const __DEV_SERVER__: boolean;
 
 const BROWSER_TTL = 300; // seconds
 const EDGE_TTL = 7 * 24 * 3600;
 
 async function cached(request: Request, env: Env, ctx: ExecutionContext, produce: () => Promise<Response>): Promise<Response> {
   if (request.method !== "GET") return produce();
+  if (__DEV_SERVER__) {
+    const res = await produce();
+    const out = new Response(res.body, res);
+    out.headers.set("Cache-Control", "no-store");
+    return out;
+  }
   const key = new URL(request.url);
   key.searchParams.set("__v", `${await datasetVersion(env.DB)}-${__BUILD_ID__}`);
   const cache = caches.default;

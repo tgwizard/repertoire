@@ -1,6 +1,7 @@
 import { composerPath, lifespan, useApi, type SearchResults as Results } from "../lib/api";
 import { Link } from "../lib/router";
 import { useWorks, WORKS_PAGE } from "../lib/useWorks";
+import { LoadError } from "./LoadError";
 import { WorkList } from "./WorkList";
 
 const fmt = new Intl.NumberFormat("en");
@@ -32,7 +33,7 @@ export function SearchField({ value, onChange, narrowed }: FieldProps) {
 /** Search across every line-up: composers first, then works by relevance. */
 export function SearchResults({ q }: { q: string }) {
   const query = `q=${encodeURIComponent(q)}`;
-  const { works, total, loading, hasMore, loadMore } = useWorks(query, "/api/search");
+  const { works, total, loading, error, hasMore, loadMore, retry } = useWorks(query, "/api/search");
   // The first page (shared with useWorks' cache) has the matching composers.
   const first = useApi<Results>(`/api/search?${query}&limit=${WORKS_PAGE}&offset=0&facets=1`);
   const composers = first.data?.composers ?? [];
@@ -66,7 +67,8 @@ export function SearchResults({ q }: { q: string }) {
           <span className="spinner" /> Searching…
         </p>
       )}
-      {!loading && first.data && total === 0 && <p className="muted">Nothing found. Try fewer words, or a composer's surname.</p>}
+      {error && <LoadError what="the search results" message={error} onRetry={retry} />}
+      {!loading && !error && first.data && total === 0 && <p className="muted">Nothing found. Try fewer words, or a composer's surname.</p>}
       {hasMore && (
         <button className="more" onClick={loadMore} disabled={loading}>
           {loading ? "Loading…" : `Load more (${fmt.format(total - works.length)} left)`}

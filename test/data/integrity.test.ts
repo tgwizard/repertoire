@@ -10,6 +10,7 @@ import { DATASET_PATH, PREVIOUS_PATH, readPrevious } from "../../crawler/build.t
 import { SCHEMA_VERSION } from "../../crawler/db.ts";
 import { ID_PATTERN } from "../../crawler/ids.ts";
 import { describe, ensembleKey, parseEnsembleKey, playerCount } from "../../src/lib/instrumentation.ts";
+import { formatOrchestration, LABELS, orchestraColumns } from "../../src/lib/orchestration.ts";
 import { ERAS, PROVIDERS, score, SIGNALS, type ProviderId, type Signal } from "../../src/shared/data.ts";
 
 if (!existsSync(DATASET_PATH)) throw new Error(`No dataset at ${DATASET_PATH}: run npm run index or npm run data:pull`);
@@ -104,6 +105,29 @@ test("text is composed (NFC), so it matches and searches the way it's typed", ()
     for (const r of db.prepare(sql).iterate() as Iterable<Record<string, any>>)
       if (r.t !== r.t.normalize("NFC") && problems.push(`${what} ${r.id}: ${r.t.slice(0, 60)}`) >= 5) break;
   assert.deepEqual(problems, []);
+});
+
+test("orchestral scorings: for orchestral works, whole orchestras, columns as the instruments say", () => {
+  none(
+    "SELECT o.work_id FROM orchestrations o WHERE NOT EXISTS (SELECT 1 FROM scorings s WHERE s.work_id = o.work_id AND s.arrangement = 0 AND s.lineup LIKE '%orchestra%')",
+    "scorings for works not written for orchestra",
+  );
+  none("SELECT work_id FROM orchestrations WHERE str = 0 AND work_id NOT IN (SELECT work_id FROM scorings WHERE lineup LIKE '%orchestra without strings%')", "orchestras without strings");
+  for (const r of all("SELECT * FROM orchestrations")) {
+    const o = JSON.parse(r.instruments);
+    assert.equal(r.scoring, formatOrchestration(o), r.work_id);
+    for (const [k, n] of Object.entries(orchestraColumns(o))) assert.equal(r[k], n, `${r.work_id}.${k}`);
+    assert.ok(Object.keys(o).every((k) => k in LABELS), `${r.work_id}: unknown instrument in ${r.instruments}`);
+  }
+  const n = one("SELECT COUNT(*) AS n FROM orchestrations").n;
+  assert.ok(n > 4_000, `only ${n} orchestral scorings`);
+});
+
+test("durations and movements are plausible", () => {
+  none("SELECT id, duration FROM works WHERE duration < 10 OR duration > 6 * 3600", "durations under 10 seconds or over 6 hours");
+  none("SELECT id, movements FROM works WHERE movements < 1 OR movements > 200", "implausible movement counts");
+  const n = one("SELECT COUNT(duration) AS d, COUNT(movements) AS m FROM works");
+  assert.ok(n.d > 30_000 && n.m > 50_000, `durations ${n.d}, movements ${n.m}`);
 });
 
 test("composers: every one has works, and counts match", () => {

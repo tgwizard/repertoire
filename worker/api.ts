@@ -1,6 +1,7 @@
 // The JSON API: /api/… Plain Request → Response, so tests can call it directly.
 
 import { decodeEnsemble, ensembleKey } from "../src/lib/instrumentation.ts";
+import { parseOrchestration, type Orchestration } from "../src/lib/orchestration.ts";
 import { ERAS, type Era, type LineupsIndex, type WorkSort } from "../src/shared/data.ts";
 import { getComposer, getLineup, getLineups, getMeta, getWork, listWorks, search, type Db, type Found } from "./queries.ts";
 
@@ -23,6 +24,14 @@ export function lineupParam(value: string | null): string | undefined {
   const key = ensembleKey(decodeEnsemble(value.replaceAll("*", ":")));
   if (!key) throw new HttpError(400, `Not a line-up: ${value}`);
   return key;
+}
+
+/** An orchestra's scoring in the shorthand: "2.2.2.2,4.2.3.1,timp,str" */
+export function orchestraParam(value: string | null): Orchestration | undefined {
+  if (!value) return undefined;
+  const o = parseOrchestration(value);
+  if (!o) throw new HttpError(400, `Not an orchestra's scoring: ${value}`);
+  return o;
 }
 
 const int = (value: string | null, fallback: number) => {
@@ -69,7 +78,7 @@ const ENDPOINTS = {
   "/api/meta": "Dataset version, counts and sources",
   "/api/lineups": "All line-ups: key → [original works, arrangement-only works]",
   "/api/lineups/{key}": "One line-up, e.g. /api/lineups/cello,viola,violin*2",
-  "/api/works?lineup={key}": "Works for a line-up. Also: subsets=1 (smaller groups too), min_players, arrangements=1, composer, era (repeatable), show=core|free, q, sort=rank|players|chronological|composer|title, offset, limit (≤200), facets=1",
+  "/api/works?lineup={key}": "Works for a line-up. Also: subsets=1 (smaller groups too), min_players, arrangements=1, composer, era (repeatable), show=core|free, q, orchestra (a scoring, e.g. 2.2.2.2,4.2.3.1,timp,str) with fit=within|exact, min_duration (minutes, from) and max_duration (minutes, under), or duration=unknown, sort=rank|players|chronological|composer|title|duration, order=asc|desc, offset, limit (≤200), facets=1",
   "/api/works/{id}": "One work, with its line-ups, links and ranking",
   "/api/composers/{id}": "One composer; their works: /api/works?composer={id}",
   "/api/search?q={text}": "Works and composers matching a search; limit, offset",
@@ -109,7 +118,13 @@ export async function handleApi(request: Request, db: Db): Promise<Response> {
           eras: p.getAll("era").filter((e): e is Era | "Unknown" => e === "Unknown" || (ERAS as readonly string[]).includes(e)),
           show: (["core", "free"] as const).find((s) => s === p.get("show")) ?? "all",
           q,
+          orchestra: orchestraParam(p.get("orchestra")),
+          fit: p.get("fit") === "exact" ? "exact" : "within",
+          minDuration: int(p.get("min_duration"), 0) || undefined,
+          maxDuration: int(p.get("max_duration"), 0) || undefined,
+          unknownDuration: p.get("duration") === "unknown",
           sort: (p.get("sort") as WorkSort | null) ?? "rank",
+          order: (["asc", "desc"] as const).find((o) => o === p.get("order")),
           offset: int(p.get("offset"), 0),
           limit: int(p.get("limit"), 50),
           facets: p.get("facets") === "1",

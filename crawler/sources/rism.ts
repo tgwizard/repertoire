@@ -39,6 +39,8 @@ export interface RismSource {
   catalogue: { name: string; number: string }[];
   /** "Autograph manuscript", "Manuscript copy", "Print" */
   type: string | null;
+  /** Its parts, instrument and count (MARC 594): [["vl", 2], ["ob", 2], ["cor", 2]] */
+  scoring?: [string, number][];
   holdings: RismHolding[];
 }
 
@@ -110,7 +112,7 @@ export function parseSource(record: string): (RismSource & { holdings: (RismHold
     .map((h) => ({ siglum: h.a?.[0] ?? "", shelf: h.c?.[0] ?? null, library: h.e?.[0] ?? null }))
     .filter((h) => h.siglum && h.siglum !== "XX");
   if (!id || !person || !title || !holdings.length) return null;
-  return {
+  const source = {
     id,
     person,
     title,
@@ -122,6 +124,8 @@ export function parseSource(record: string): (RismSource & { holdings: (RismHold
     type: first(f, "593", "a"),
     holdings,
   };
+  const scoring = (f.get("594") ?? []).filter((x) => x.b?.[0]).map((x): [string, number] => [x.b![0]!, Number(x.c?.[0]) || 1]);
+  return scoring.length ? { ...source, scoring } : source;
 }
 
 export function parsePerson(record: string): [string, RismPerson] | null {

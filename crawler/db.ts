@@ -2,7 +2,7 @@
 // published as the SQLite download and loaded into Cloudflare D1, which the Worker
 // queries. Comments here are the documentation of the downloads too.
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const TABLES = `
 -- Dataset version, build time, counts, schema version and stats (JSON)
@@ -50,8 +50,27 @@ CREATE TABLE works (
   free INTEGER NOT NULL,              -- 1 if sheet music is free to download (IMSLP)
   lineup TEXT NOT NULL,               -- its main line-up (the first original one)
   lineups INTEGER NOT NULL,           -- number of line-ups it is listed for
-  copies INTEGER NOT NULL             -- libraries known to hold a copy (RISM, LIBRIS)
+  copies INTEGER NOT NULL,            -- libraries known to hold a copy (RISM, LIBRIS)
+  duration INTEGER,                   -- seconds, roughly (IMSLP)
+  movements INTEGER                   -- (IMSLP)
 );
+
+-- An orchestral work's scoring, in the shorthand orchestras use. The counts are players
+-- per section, auxiliaries included (a piccolo needs a flautist), so that "can our
+-- orchestra play it" is a comparison per column.
+CREATE TABLE orchestrations (
+  work_id TEXT PRIMARY KEY REFERENCES works (id),
+  scoring TEXT NOT NULL,              -- "2+picc.2.2.2+cbn – 4.2.3.1 – timp – perc – str"
+  instruments TEXT NOT NULL,          -- JSON: instrument → players ({"fl":2,"picc":1,…})
+  fl INTEGER NOT NULL, ob INTEGER NOT NULL, cl INTEGER NOT NULL, bn INTEGER NOT NULL,
+  hn INTEGER NOT NULL, tpt INTEGER NOT NULL, tbn INTEGER NOT NULL, tba INTEGER NOT NULL,
+  timp INTEGER NOT NULL, perc INTEGER NOT NULL, hp INTEGER NOT NULL,
+  kbd INTEGER NOT NULL,               -- piano, celesta, organ, harpsichord, continuo
+  other INTEGER NOT NULL,             -- saxophones, guitars, mandolins
+  str INTEGER NOT NULL,               -- 1 with a string section
+  source TEXT NOT NULL,               -- imslp (its parts or Instrumentation field), rism
+  ref TEXT NOT NULL                   -- the IMSLP page id or RISM source id it's read from
+) WITHOUT ROWID;
 
 -- Line-ups: a key lists instrument ids, sorted, with "*N" for several players
 -- ("cello,viola,violin*2" is a string quartet)
@@ -111,4 +130,4 @@ CREATE UNIQUE INDEX links_ref ON links (entity, provider, ref);
 `;
 
 /** Tables in the downloads and in D1, in dependency order (FTS tables are rebuilt from these). */
-export const DATA_TABLES = ["meta", "sources", "composers", "works", "lineups", "scorings", "links", "redirects"] as const;
+export const DATA_TABLES = ["meta", "sources", "composers", "works", "lineups", "scorings", "orchestrations", "links", "redirects"] as const;

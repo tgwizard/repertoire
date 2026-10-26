@@ -40,6 +40,9 @@ import { librisHolding, librisLineup, librisUrl, type LibrisStage } from "./sour
 import { gndLineup, gndMatchTitle, gndTitle, gndUrl, type GndStage } from "./sources/gnd.ts";
 import { rismMatchTitle, rismPersonUrl, rismRank, rismUrl, type RismStage } from "./sources/rism.ts";
 import type { OpenOpusStage } from "./sources/openopus.ts";
+import { parseDuration, parseMovements, type ImslpPagesStage } from "./sources/imslp-pages.ts";
+import { isFullOrchestra, mergeOrchestrations, orchestrationFromParts, orchestrationFromRism, orchestrationFromText } from "./orchestration.ts";
+import { formatOrchestration, orchestraColumns, type Orchestration } from "../src/lib/orchestration.ts";
 import type { WdWork, WikidataStage } from "./sources/wikidata.ts";
 import type { WikipediaStage } from "./sources/wikipedia.ts";
 
@@ -51,6 +54,7 @@ export const PREVIOUS_PATH = join(BUILD_DIR, "repertoire.previous.sqlite");
 
 export interface BuildInput {
   imslp: ImslpStage;
+  imslpPages: ImslpPagesStage | null;
   eras: ComposerErasStage["eras"];
   wikipedia: WikipediaStage | null;
   wikidata: WikidataStage | null;
@@ -67,6 +71,7 @@ export async function loadInput(): Promise<BuildInput> {
   if (!imslp) throw new Error("No IMSLP data yet: run `npm run crawl -- imslp` first");
   return {
     imslp,
+    imslpPages: await readStage<ImslpPagesStage>("imslp-pages"),
     eras: (await readStage<ComposerErasStage>("imslp-composer-eras"))?.eras ?? {},
     wikipedia: await readStage<WikipediaStage>("wikipedia"),
     wikidata: await readStage<WikidataStage>("wikidata"),
@@ -112,6 +117,11 @@ interface BuildWork {
   ensembles: Map<string, Membership>;
   /** Libraries holding a copy (RISM sigla; LIBRIS counts as Musik- och teaterbiblioteket) */
   libraries: Set<string>;
+  /** An orchestra's scoring, and where it was read */
+  orchestration?: { o: Orchestration; source: "imslp" | "rism"; ref: string };
+  /** Seconds */
+  duration?: number;
+  movements?: number;
   /** Links from sources that only point at the work (Mutopia editions…) */
   extraLinks: { provider: ProviderId; ref: string; url: string | null; label: string | null; source: SourceId }[];
 }
@@ -212,7 +222,7 @@ export const NONE: Previous = { work: NO_PREVIOUS, composer: NO_PREVIOUS };
 
 /** Merges the sources into a new database at `out`, keeping ids from `previous`. */
 export function build(input: BuildInput, out: string, previous: Previous, builtAt = new Date()): BuildResult {
-  const { imslp, eras, wikipedia: wiki, wikidata: wd, openopus: oo, musicbrainz: mb, mutopia, libris, gnd, rism } = input;
+  const { imslp, imslpPages, eras, wikipedia: wiki, wikidata: wd, openopus: oo, musicbrainz: mb, mutopia, libris, gnd, rism } = input;
   const works = new Map<string, BuildWork>();
   const composers = new Map<string, BuildComposer>();
   const byComposer = new Map<string, BuildWork[]>();
@@ -295,6 +305,25 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
       }
       addMembership(w, parsed.parts, parsed.arr, "imslp", category);
     }
+  }
+
+  // ---- 1b. IMSLP work pages: duration, movements, an orchestra's scoring ------------
+  // The scoring comes from the part names of the original editions (parts uploaded on
+  // their own add what a whole set lacks, unless they're stand-ins: a bass clarinet for
+  // the bassoons), and from the Instrumentation field, each instrument at its largest
+  // count: the field often leaves out percussion. Whether the work is for orchestra at
+  // all is checked when it's written.
+  for (const w of works.values()) {
+    const page = w.imslp && imslpPages?.pages[w.imslp.pageid];
+    if (!page) continue;
+    const duration = page.duration && parseDuration(page.duration);
+    if (duration) w.duration = duration;
+    const movements = page.movements && parseMovements(page.movements);
+    if (movements) w.movements = movements;
+    const readings = (page.parts ?? []).map((p) => orchestrationFromParts(p).orchestration);
+    const text = page.instrumentation && orchestrationFromText(page.instrumentation);
+    if (text) readings.push(text.orchestration);
+    if (readings.length) w.orchestration = { o: mergeOrchestrations(readings), source: "imslp", ref: String(w.imslp!.pageid) };
   }
 
   // ---- 2. Wikidata: composers, and links for IMSLP works -------------------
@@ -618,6 +647,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     index(`${w.composer}|=${bareTitle(w.title)}`, w);
   }
   const best = new Map<BuildWork, { id: string; rank: number; label: string }[]>();
+  const rismScorings = new Map<BuildWork, { o: Orchestration; id: string }[]>();
   for (const src of rism?.sources ?? []) {
     const person = rism!.people[src.person];
     const composerKey = (person?.wikidata && composerKeyByQid.get(person.wikidata)) || (person?.gnd && composerByGnd.get(person.gnd)) || undefined;
@@ -632,6 +662,8 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     stats.matched.rism++;
     composers.get(composerKey)!.rism ??= src.person;
     for (const h of src.holdings) w.libraries.add(h.siglum);
+    const o = src.scoring && !src.excerpt ? orchestrationFromRism(src.scoring) : null;
+    if (o && isFullOrchestra(o)) rismScorings.set(w, [...(rismScorings.get(w) ?? []), { o, id: src.id }]);
     const h = src.holdings[0]!;
     const library = rism!.libraries[h.siglum];
     const shelf = h.shelf && !/^\[.*\]$/.test(h.shelf) ? h.shelf : null; // not "[no indication]"
@@ -640,6 +672,23 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     list.push({ id: src.id, rank: rismRank(src.type) + (src.excerpt ? 0.5 : 0), label });
     best.set(w, list);
   }
+  // A scoring from the copies, for works IMSLP gave none (or only an incomplete one):
+  // the one most copies agree on, and of those the largest (copies lose parts more often
+  // than they gain them).
+  for (const [w, list] of rismScorings) {
+    if (w.orchestration && isFullOrchestra(w.orchestration.o)) continue;
+    const votes = new Map<string, { o: Orchestration; id: string; n: number }>();
+    for (const { o, id } of list) {
+      const key = formatOrchestration(o);
+      const v = votes.get(key) ?? { o, id, n: 0 };
+      v.n++;
+      votes.set(key, v);
+    }
+    const size = (o: Orchestration) => Object.values(o).reduce((a, b) => a + b, 0);
+    const pick = [...votes.values()].sort((a, b) => b.n - a.n || size(b.o) - size(a.o) || Number(a.id) - Number(b.id))[0]!;
+    w.orchestration = { o: pick.o, source: "rism", ref: pick.id };
+  }
+
   // A few copies per work: the composer's own hand first, then prints.
   for (const [w, list] of best) {
     for (const s of list.sort((a, b) => a.rank - b.rank || Number(a.id) - Number(b.id)).slice(0, 3)) {
@@ -687,13 +736,14 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
   db.exec("BEGIN");
 
   const insertComposer = db.prepare("INSERT INTO composers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-  const insertWork = db.prepare("INSERT INTO works VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+  const insertWork = db.prepare("INSERT INTO works VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
   const insertScoring = db.prepare("INSERT INTO scorings VALUES (?, ?, ?, ?, ?, ?)");
   const insertLink = db.prepare("INSERT INTO links VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
   const insertLineup = db.prepare("INSERT INTO lineups VALUES (?, ?, ?, ?, ?, ?)");
   const insertRedirect = db.prepare("INSERT INTO redirects VALUES (?, ?, ?)");
   const insertWorkFts = db.prepare("INSERT INTO works_fts (rowid, title, composer, aliases, keys) VALUES (?, ?, ?, ?, ?)");
   const insertComposerFts = db.prepare("INSERT INTO composers_fts (rowid, name) VALUES (?, ?)");
+  const insertOrchestration = db.prepare(`INSERT INTO orchestrations VALUES (${Array(19).fill("?").join(", ")})`);
 
   // A provider's record belongs to one work (or composer). Rarely two sources link the
   // same record to different works (two Wikidata items with one MusicBrainz id): the
@@ -724,6 +774,17 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     if (c.rism) link("composer", id, "rism", c.rism, rismPersonUrl(c.rism), "rism");
   });
 
+  // A scoring is kept for works written for orchestra (not only arranged for one: any
+  // line-up with an orchestra in it, "orchestra*2" and "voices with orchestra" too), when
+  // it reads as a whole orchestra; one without strings only for "orchestra without strings".
+  const orchestral = (w: BuildWork) => {
+    if (!w.orchestration) return null;
+    const ids = [...w.ensembles].filter(([, m]) => !m.arr).flatMap(([k]) => Object.keys(parseEnsembleKey(k)));
+    if (ids.some((id) => id.includes("orchestra") && id !== "orchestra without strings")) return isFullOrchestra(w.orchestration.o) ? w.orchestration : null;
+    if (ids.includes("orchestra without strings") && !w.orchestration.o.str && Object.keys(w.orchestration.o).length >= 2) return w.orchestration;
+    return null;
+  };
+  let orchestrations = 0;
   const lineupCounts = new Map<string, { original: number; arrangements: number }>();
   let core = 0;
   workList.forEach((w, i) => {
@@ -759,7 +820,14 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
       memberships[0]![0],
       memberships.length,
       w.libraries.size,
+      w.duration ?? null,
+      w.movements ?? null,
     );
+    const orch = orchestral(w);
+    if (orch) {
+      insertOrchestration.run(id, formatOrchestration(orch.o), JSON.stringify(orch.o), ...Object.values(orchestraColumns(orch.o)), orch.source, orch.ref);
+      orchestrations++;
+    }
     for (const [key, m] of memberships) {
       insertScoring.run(id, key, m.arr ? 1 : 0, players(key), s, JSON.stringify([...m.refs].map(([source, ref]) => ({ source, ref }))));
       const counts = lineupCounts.get(key) ?? { original: 0, arrangements: 0 };
@@ -809,7 +877,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
         items: Object.keys(imslp.works).length,
         matched: null,
         added: workList.filter((w) => w.imslp).length,
-        note: `${Object.keys(imslp.members).length} instrumentation categories`,
+        note: `${Object.keys(imslp.members).length} instrumentation categories; ${Object.keys(imslpPages?.pages ?? {}).length} work pages read for durations, movements and orchestral parts`,
       },
       wikipedia: {
         fetchedAt: iso(wiki?.fetchedAt),
@@ -917,6 +985,9 @@ function datasetStats(db: DatabaseSync): DatasetStats {
     core: one(`SELECT COUNT(*) AS n FROM works WHERE score >= ${CORE_SCORE}`).n,
     free: one("SELECT COUNT(*) AS n FROM works WHERE free = 1").n,
     arrangementOnly: one("SELECT COUNT(*) AS n FROM works w WHERE NOT EXISTS (SELECT 1 FROM scorings s WHERE s.work_id = w.id AND s.arrangement = 0)").n,
+    orchestrations: Object.fromEntries(all("SELECT source, COUNT(*) AS n FROM orchestrations GROUP BY source").map((r) => [r.source, r.n])),
+    durations: one("SELECT COUNT(duration) AS n FROM works").n,
+    movements: one("SELECT COUNT(movements) AS n FROM works").n,
     bySource,
     links: Object.fromEntries(all("SELECT provider, COUNT(*) AS n FROM links WHERE entity = 'work' GROUP BY provider").map((r) => [r.provider, r.n])) as DatasetStats["links"],
     eras: Object.fromEntries(all("SELECT era, COUNT(*) AS n FROM works GROUP BY era ORDER BY n DESC").map((r) => [r.era ?? "Unknown", r.n])),

@@ -1,6 +1,6 @@
 # Repertoire Finder
 
-Find the repertoire for the group you actually have: pick your instruments, and get the works written for exactly that line-up (or for smaller groups drawn from it), most established first, with free sheet music ([IMSLP](https://imslp.org), Mutopia) and library copies where they exist. Search works and composers, and every work and composer has its own page.
+Find the repertoire for the group you actually have: pick your instruments, and get the works written for exactly that line-up (or for smaller groups drawn from it), most established first, with free sheet music ([IMSLP](https://imslp.org), Mutopia) and library copies where they exist. An orchestra can give its scoring (`2.2.2.2 4.2.3.1 timp str`) and see what it can play. Search works and composers, and every work and composer has its own page.
 
 Live at https://repertoire.tgwizard.com. See [/about](https://repertoire.tgwizard.com/about) for where the data comes from, with numbers.
 

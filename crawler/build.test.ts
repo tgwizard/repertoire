@@ -85,7 +85,20 @@ test("RISM: copies of works we have, the composer's own hand first; libraries co
   ]);
   assert.equal(brahms.copies, 3); // Berlin, Vienna (RISM) and Stockholm (LIBRIS)
   assert.equal(all("SELECT * FROM works WHERE title LIKE '%999%'").length, 0);
-  assert.deepEqual(all("SELECT items, matched, added FROM sources WHERE id = 'rism'")[0], { items: 3, matched: 2, added: null });
+  assert.deepEqual(all("SELECT items, matched, added FROM sources WHERE id = 'rism'")[0], { items: 4, matched: 3, added: null });
+});
+
+test("orchestral scoring: from IMSLP's parts, else RISM's copies; only for whole orchestras", () => {
+  const scoring = (title: string) => all("SELECT scoring, fl, bn, tbn, perc, str, source, ref FROM orchestrations WHERE work_id = ?", work(title).id)[0];
+  // Alto, tenor and bass trombones are three; a harp part uploaded on its own adds a harp, a stand-in nothing
+  assert.deepEqual(scoring("Symphony No.1, Op.68"), { scoring: "2.2.2.2+cbn – 4.2.3.0 – timp – hp – str", fl: 2, bn: 3, tbn: 3, perc: 0, str: 1, source: "imslp", ref: "20" });
+  assert.deepEqual(scoring("Symphony No.4, Op.98"), { scoring: "2+picc.2.2.2+cbn – 4.2.3.0 – timp – perc – str", fl: 3, bn: 3, tbn: 3, perc: 1, str: 1, source: "rism", ref: "9004" });
+  assert.equal(scoring("Symphony in G major, Op.5"), undefined); // only the string parts uploaded
+  assert.equal(scoring("String Quartet No.62, Op.76 No.3"), undefined); // not for orchestra
+  assert.deepEqual(
+    [work("String Quartet No.62, Op.76 No.3"), work("Symphony No.1, Op.68"), work("Clarinet Quintet, Op.115")].map((w) => [w.duration, w.movements]),
+    [[1200, 4], [2700, 4], [null, null]],
+  );
 });
 
 test("works IMSLP lacks come in when a source states an exact line-up", () => {
@@ -156,7 +169,7 @@ test("downloads: a CSV per table with a README, and the database itself", async 
   assert.deepEqual([...files.keys()].sort(), ["README.txt", ...DATA_TABLES.map((t) => `${t}.csv`)].sort());
   assert.match(files.get("README.txt")!, /CC BY-SA 4\.0/);
   const worksCsv = files.get("works.csv")!.split("\r\n");
-  assert.equal(worksCsv[0], "n,id,title,aliases,composer_id,year,era,score,signals,recordings,sitelinks,free,lineup,lineups,copies");
+  assert.equal(worksCsv[0], "n,id,title,aliases,composer_id,year,era,score,signals,recordings,sitelinks,free,lineup,lineups,copies,duration,movements");
   assert.equal(worksCsv.filter(Boolean).length - 1, all("SELECT COUNT(*) AS n FROM works")[0]!.n);
   const sqlite = gunzipSync(await readFile(join(dir, EXPORT_FILES.sqlite)));
   assert.deepEqual(sqlite, await readFile(path));

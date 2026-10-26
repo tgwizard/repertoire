@@ -19,7 +19,7 @@ const CC_BY_SA = "https://creativecommons.org/licenses/by-sa/4.0/";
 const CC0 = "https://creativecommons.org/publicdomain/zero/1.0/";
 
 export const SOURCES: Record<SourceId, SourceInfo> = {
-  imslp: { name: "IMSLP", url: "https://imslp.org", license: "CC BY-SA 4.0", licenseUrl: CC_BY_SA, role: "Instrumentation, works and sheet music" },
+  imslp: { name: "IMSLP", url: "https://imslp.org", license: "CC BY-SA 4.0", licenseUrl: CC_BY_SA, role: "Instrumentation, works and sheet music; orchestral scorings, durations" },
   wikipedia: { name: "Wikipedia", url: "https://en.wikipedia.org", license: "CC BY-SA 4.0", licenseUrl: CC_BY_SA, role: "Curated “Compositions for …” lists" },
   wikidata: { name: "Wikidata", url: "https://www.wikidata.org", license: "CC0", licenseUrl: CC0, role: "Links between sources, dates" },
   openopus: { name: "Open Opus", url: "https://openopus.org", license: "CC0", licenseUrl: CC0, role: "Popular and recommended works" },
@@ -50,7 +50,7 @@ export const SOURCES: Record<SourceId, SourceInfo> = {
     url: "https://rism.online",
     license: "CC BY 3.0",
     licenseUrl: "https://creativecommons.org/licenses/by/3.0/",
-    role: "Manuscripts and early prints, and the libraries that hold them",
+    role: "Manuscripts and early prints, and the libraries that hold them; orchestral scorings",
   },
 };
 
@@ -169,6 +169,21 @@ export interface WorkSummary {
   lineup: string;
   players: number;
   arrangement: boolean;
+  /** Seconds, roughly */
+  duration: number | null;
+  movements: number | null;
+  /** An orchestral work's scoring: "2.2.2.2 – 4.2.3.1 – timp – str" */
+  orchestration: string | null;
+}
+
+/** Where an orchestral work's scoring was read */
+export interface OrchestrationDetail {
+  scoring: string;
+  /** Instrument → players: { fl: 2, picc: 1, … } */
+  instruments: Record<string, number>;
+  source: SourceId;
+  ref: string;
+  url: string;
 }
 
 export interface Scoring {
@@ -192,6 +207,10 @@ export interface WorkDetail {
   scoreParts: { label: string; points: number }[];
   /** Libraries known to hold a copy (RISM, LIBRIS) */
   copies: number;
+  /** Seconds, roughly */
+  duration: number | null;
+  movements: number | null;
+  orchestration: OrchestrationDetail | null;
   scorings: Scoring[];
   links: Link[];
 }
@@ -205,8 +224,18 @@ export interface ComposerDetail extends ComposerRef {
   lineups: { key: string; description: string; count: number }[];
 }
 
+/** Length filters, in minutes: from (inclusive) to (exclusive), 0 for open-ended */
+export const LENGTHS: { label: string; min: number; max: number }[] = [
+  { label: "Under 10 min", min: 0, max: 10 },
+  { label: "10–20 min", min: 10, max: 20 },
+  { label: "20–40 min", min: 20, max: 40 },
+  { label: "Over 40 min", min: 40, max: 0 },
+];
+
 export interface Facets {
   eras: Partial<Record<Era | "Unknown", number>>;
+  /** Works per LENGTHS entry, and how many have no known length */
+  lengths: { known: number[]; unknown: number };
   composers: { id: string; name: string; count: number }[];
   /** Sub-line-ups, when listing a group's smaller groups too */
   lineups: { key: string; description: string; players: number; count: number }[];
@@ -219,6 +248,8 @@ export interface WorksPage {
   offset: number;
   works: WorkSummary[];
   facets: Facets | null;
+  /** With an orchestra to fit: works for orchestra whose scoring isn't known, left out */
+  unscored?: number;
 }
 
 export interface SearchResults {
@@ -250,6 +281,11 @@ export interface DatasetStats {
   free: number;
   /** Works known only through arrangements */
   arrangementOnly: number;
+  /** Orchestral works with a known scoring, by where it was read */
+  orchestrations?: Partial<Record<SourceId, number>>;
+  /** Works with a duration, and with a number of movements */
+  durations?: number;
+  movements?: number;
   /** Per source: line-up assignments it vouches for, and links it gave */
   bySource: Record<SourceId, { lineups: number; links: number }>;
   links: Record<ProviderId, number>;
@@ -270,7 +306,8 @@ export interface Meta {
   stats: DatasetStats | null;
 }
 
-export type WorkSort = "rank" | "players" | "chronological" | "composer" | "title";
+export type WorkSort = "rank" | "players" | "chronological" | "composer" | "title" | "duration";
+export type SortOrder = "asc" | "desc";
 
 // ---- Published datasets ----------------------------------------------------
 

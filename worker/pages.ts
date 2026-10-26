@@ -4,7 +4,7 @@
 
 import { describe, parseEnsembleKey } from "../src/lib/instrumentation.ts";
 import type { ComposerDetail, WorkDetail } from "../src/shared/data.ts";
-import { composerPath, workPath } from "../src/shared/paths.ts";
+import { composerPath, formatDuration, workPath } from "../src/shared/paths.ts";
 import { getComposer, getWork, type Db } from "./queries.ts";
 
 const SITE = "Repertoire Finder";
@@ -33,6 +33,8 @@ function workPage(w: WorkDetail, origin: string): Page {
   const description =
     `${w.title}${by}${w.year ? ` (${w.year})` : ""}, for ${describe(parseEnsembleKey(forWhom.lineup))}.` +
     (originals.length > 1 ? ` Also for ${originals.length - 1} other line-up${originals.length > 2 ? "s" : ""}.` : "") +
+    (w.orchestration ? ` Scoring: ${w.orchestration.scoring}.` : "") +
+    (w.duration ? ` About ${formatDuration(w.duration)}.` : "") +
     (score ? " Free sheet music on IMSLP." : "");
   const url = `${origin}${workPath(w)}`;
   return {

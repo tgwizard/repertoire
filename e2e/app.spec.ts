@@ -90,6 +90,74 @@ test("filters narrow the list, from facets with counts", async ({ page }) => {
   await expect(works(page)).toHaveCount(1);
 });
 
+test("filters and sort live in the URL: a reload, a link or going back shows the same list", async ({ page }) => {
+  await page.goto("/?i=violin:2,viola,cello");
+  await page.getByRole("button", { name: /^Romantic \d/ }).click();
+  await page.getByRole("combobox", { name: "Sort" }).selectOption({ label: "Newest first" });
+  await page.getByRole("combobox", { name: "Length" }).selectOption("20-40");
+  await expect(page).toHaveURL(/era=Romantic&sort=chronological&order=desc&len=20-40/);
+  await page.waitForLoadState("networkidle");
+  await expect(page.locator(".works-wrap.stale")).toHaveCount(0);
+  const heading = await page.locator(".results-head h2").textContent();
+  const first = await works(page).first().locator(".work-title").textContent();
+
+  await page.reload();
+  await expect(page.getByRole("button", { name: /^Romantic \d/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("combobox", { name: "Sort" })).toHaveValue("chronological:desc");
+  await expect(page.getByRole("combobox", { name: "Length" })).toHaveValue("20-40");
+  await expect(page.locator(".results-head h2")).toHaveText(heading!);
+  await expect(works(page).first().locator(".work-title")).toHaveText(first!);
+
+  await works(page).first().locator(".work-title").click();
+  await expect(page).toHaveURL(/\/work\//);
+  await page.goBack();
+  await expect(page).toHaveURL(/era=Romantic&sort=chronological&order=desc&len=20-40/);
+  await expect(works(page).first().locator(".work-title")).toHaveText(first!);
+
+  // Another ensemble starts afresh
+  await page.getByRole("button", { name: /^Piano trio \d/ }).click();
+  await expect(page).toHaveURL(/\?i=[^&]+$/);
+});
+
+test("a crash shows a way out, not a blank page", async ({ page }) => {
+  // What a response cached for older code once did: facets without the length counts
+  await page.route(/\/api\/works\?.*facets=1/, async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    delete body.facets.lengths;
+    await route.fulfill({ response: res, json: body });
+  });
+  page.on("pageerror", () => {}); // expected
+  await page.goto("/?i=violin:2,viola,cello");
+  await expect(page.getByRole("alert")).toContainText("Something went wrong showing this page");
+  await expect(page.getByRole("link", { name: "report it" })).toHaveAttribute("href", /github\.com\/tgwizard\/repertoire\/issues\/new/);
+  await expect(page.getByRole("button", { name: "Reload" })).toBeVisible();
+  await expect(page.locator(".site-title")).toBeVisible();
+});
+
+test("where a line-up comes from is behind a ?", async ({ page }) => {
+  await page.goto("/?i=violin:2,viola,cello");
+  const sources = page.locator(".info-popover");
+  await expect(sources).toBeHidden();
+  await page.getByRole("button", { name: "Where this line-up comes from" }).click();
+  await expect(sources).toBeVisible();
+  await expect(sources).toContainText("Line-up from IMSLP");
+  await page.keyboard.press("Escape");
+  await page.locator(".site-title").hover();
+  await expect(sources).toBeHidden();
+});
+
+test("picking a composer keeps the others on offer", async ({ page }) => {
+  await page.goto("/?i=violin:2,viola,cello");
+  const select = page.getByRole("combobox", { name: "Composer" });
+  await expect(select.locator("option").first()).toHaveText(/All composers \(300\+\)/);
+  const haydn = await select.locator("option", { hasText: /^Joseph Haydn \(/ }).getAttribute("value");
+  await select.selectOption(haydn!);
+  await expect(works(page).first()).toContainText("Joseph Haydn");
+  await expect(select.locator("option").first()).toHaveText(/All composers \(300\+\)/);
+  expect(await select.locator("option").count()).toBeGreaterThan(100);
+});
+
 test("smaller groups: the full group's works, then those for fewer players", async ({ page }) => {
   await page.goto("/?i=flute,oboe,clarinet,bassoon,horn,piano");
   await page.getByLabel(/Include smaller groups/).check();
@@ -104,6 +172,30 @@ test("smaller groups: the full group's works, then those for fewer players", asy
   const quintet = await group.locator("option", { hasText: /^flute, oboe, clarinet, bassoon, horn \(/ }).getAttribute("value");
   await group.selectOption(quintet!);
   await expect(works(page).first()).toContainText("Wind Quintet, Op.43");
+});
+
+test("an orchestra gives its scoring and gets what it can play; the scoring is in the link", async ({ page }) => {
+  const noErrors = watchErrors(page);
+  await page.goto("/?i=orchestra");
+  await expect(works(page).first()).toBeVisible();
+  const field = page.getByLabel("Your orchestra");
+  await field.fill("2.2.2.2 2.2.0.0 timp str");
+  await expect(page.locator(".orchestra-hint")).toContainText("2 flutes, 2 oboes, 2 clarinets, 2 bassoons, 2 horns, 2 trumpets, timpani, strings");
+  await expect(page.locator(".orchestra-hint")).toContainText(/Leaves out [\d,]+ orchestral works/);
+  await expect(page).toHaveURL(/orch=2\.2\.2\.2/);
+  await expect(page.locator(".results-head h2")).toContainText("works match");
+  // Every work listed fits: no 4 horns, no trombones
+  await expect(works(page).first().locator(".orchestration-tag")).toBeVisible();
+  for (const tag of await works(page).locator(".orchestration-tag").allTextContents()) expect(tag).toMatch(/^([0-2](\+\w+)?\.){3}[0-2](\+\w+)? – [0-2]\.[0-2]\.0\.0/);
+  await field.fill("2.2.2.2 4.2.3.1 timp+perc+harpz str");
+  await expect(page.getByRole("alert")).toContainText("Couldn't read “harpz”");
+  await expect(field).toHaveAttribute("aria-invalid", "true");
+  // How to write one, with typical orchestras to start from
+  await page.getByRole("button", { name: "How to write an orchestra" }).click();
+  await page.locator(".orchestra-example", { hasText: "Romantic" }).click();
+  await expect(field).toHaveValue("2.2.2.2 4.2.3.1 timp perc str");
+  await expect(field).toHaveAttribute("aria-invalid", "false");
+  noErrors();
 });
 
 test("a work page, and back to the list where you left it", async ({ page }) => {
@@ -170,6 +262,7 @@ test("work and composer pages are rendered on the server, for links and search e
 test("the API is cached at the edge and browsers", async ({ request }) => {
   const res = await request.get("/api/meta");
   expect(res.status()).toBe(200);
+  test.skip(res.headers()["cache-control"] === "no-store", "the dev server caches nothing");
   expect(res.headers()["cache-control"]).toBe("public, max-age=300");
   expect(res.headers()["access-control-allow-origin"]).toBe("*");
 });

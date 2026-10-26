@@ -6,10 +6,18 @@ import type { ComposerDetail, LineupsIndex, Meta, SearchResults, WorkDetail, Wor
 
 const cache = new Map<string, Promise<unknown>>();
 
+declare const __BUILD_ID__: string;
+
+/**
+ * The app's build id goes with each request: browsers keep API responses for minutes,
+ * and a response cached for the last deploy's code may lack what this code expects.
+ */
+const versioned = (path: string) => `${path}${path.includes("?") ? "&" : "?"}v=${__BUILD_ID__}`;
+
 export function api<T>(path: string): Promise<T> {
   let p = cache.get(path) as Promise<T> | undefined;
   if (!p) {
-    p = fetch(path).then(async (res) => {
+    p = fetch(versioned(path)).then(async (res) => {
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new ApiError(res.status, body?.error ?? `${res.status} ${res.statusText}`);

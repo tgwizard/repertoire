@@ -1,4 +1,5 @@
 import { composerPath, lifespan, workPath } from "../lib/api";
+import { formatDuration } from "../shared/paths";
 import { describe, parseEnsembleKey } from "../lib/instrumentation";
 import { Link } from "../lib/router";
 import { CORE_SCORE, type WorkSummary } from "../shared/data";
@@ -50,9 +51,19 @@ export function WorkList({ works, lineup, showLineup, onComposer, groupByPlayers
               {lifespan(w.composer) && <span className="muted">{lifespan(w.composer)}</span>}
               {w.year && <span className="muted">· {w.year}</span>}
               {w.era && <span className="badge">{w.era}</span>}
+              {(w.duration || w.movements) && (
+                <span className="muted">
+                  {[w.duration && formatDuration(w.duration), w.movements && w.movements > 1 && `${w.movements} movements`].filter(Boolean).join(" · ")}
+                </span>
+              )}
             </div>
             <div className="work-sources">
               {other && <span className="lineup-tag">for {describe(parseEnsembleKey(w.lineup))}</span>}
+              {w.orchestration && (
+                <span className="orchestration-tag" title="Scoring: flutes.oboes.clarinets.bassoons – horns.trumpets.trombones.tuba">
+                  {w.orchestration}
+                </span>
+              )}
               {w.scoreUrl ? (
                 <a className="pill pill-imslp" href={w.scoreUrl} target="_blank" rel="noreferrer" title="Free sheet music">
                   Score on {w.scoreUrl.includes("mutopiaproject.org") ? "Mutopia" : "IMSLP"}

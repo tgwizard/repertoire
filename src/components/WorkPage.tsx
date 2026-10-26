@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { composerPath, finderPath, lifespan, useApi, type ComposerDetail, type WorkDetail, type WorksPage } from "../lib/api";
 import { Link } from "../lib/router";
+import { describeOrchestration } from "../lib/orchestration";
+import { formatDuration } from "../shared/paths";
 import { CORE_SCORE, lineupSourceUrl, PROVIDERS, SOURCES, type Link as WorkLink } from "../shared/data";
 import { WorkList } from "./WorkList";
 
@@ -72,6 +74,8 @@ export function WorkPage({ id }: { id: string }) {
             </>
           )}
           {w.year && <span className="muted"> · {w.year}</span>}
+          {w.duration && <span className="muted"> · about {formatDuration(w.duration)}</span>}
+          {w.movements && w.movements > 1 && <span className="muted"> · {w.movements} movements</span>}
           {w.era && <span className="badge">{w.era}</span>}
           {w.score >= CORE_SCORE && <span className="badge badge-core">Core repertoire</span>}
         </p>
@@ -145,6 +149,20 @@ export function WorkPage({ id }: { id: string }) {
             </li>
           ))}
         </ul>
+        {w.orchestration && (
+          <div className="orchestration">
+            <p>
+              <span className="orchestration-tag">{w.orchestration.scoring}</span>{" "}
+              <span className="muted small">
+                according to{" "}
+                <a href={w.orchestration.url} target="_blank" rel="noreferrer">
+                  {w.orchestration.source === "rism" ? "a copy in RISM" : "IMSLP's parts and description"}
+                </a>
+              </span>
+            </p>
+            <p className="small">{describeOrchestration(w.orchestration.instruments)}</p>
+          </div>
+        )}
       </section>
 
       {others.length > 0 && w.composer && main && (

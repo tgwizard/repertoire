@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { bareTitle, musicalKey } from "../../crawler/match.ts";
 import { decodeEnsemble, ensembleKey, fitsIn, parseEnsembleKey } from "../../src/lib/instrumentation.ts";
+import { orchestraColumns, parseOrchestration } from "../../src/lib/orchestration.ts";
 import type { ComposerDetail, LineupsIndex, Meta, SearchResults, WorkDetail, WorkSummary, WorksPage } from "../../src/shared/data.ts";
 import { api, request, where } from "../client.ts";
 
@@ -127,6 +128,47 @@ test("an orchestra's smaller groups include chamber and string orchestra works",
   const page = await api<WorksPage>(`/api/works?lineup=orchestra&subsets=1&limit=1&facets=1`);
   const keys = page.facets!.lineups.map((l) => l.key);
   assert.ok(keys.includes("chamber orchestra") && keys.includes("strings"), `orchestra's smaller groups: ${keys.join(" | ")}`);
+});
+
+// Section players (auxiliaries in their section): fl ob cl bn, hn tpt tbn tba; then
+// timpani and strings. As the scores have them.
+const SCORINGS: [query: string, sections: string, timp: boolean][] = [
+  ["beethoven symphony 5 op 67", "3.2.2.3 2.2.3.0", true], // piccolo and contrabassoon in the finale
+  ["beethoven symphony 7 op 92", "2.2.2.2 2.2.0.0", true],
+  ["brahms symphony 1 op 68", "2.2.2.3 4.2.3.0", true],
+  ["haydn symphony 104", "2.2.2.2 2.2.0.0", true],
+  ["schubert symphony 8 d 759", "2.2.2.2 2.2.3.0", true],
+  ["tchaikovsky symphony 5 op 64", "3.2.2.2 4.2.3.1", true],
+  ["mendelssohn hebrides op 26", "2.2.2.2 2.2.0.0", true],
+];
+
+test("orchestral works have the scoring their scores have", async () => {
+  const wrong: string[] = [];
+  for (const [q, sections, timp] of SCORINGS) {
+    const [hit] = (await search(q, 1)).works;
+    const o = hit && (await api<WorkDetail>(`/api/works/${hit.id}`)).orchestration;
+    if (!o) {
+      wrong.push(`${q}: ${hit ? `no scoring for ${hit.title}` : "not found"}`);
+      continue;
+    }
+    const c = orchestraColumns(o.instruments);
+    const got = `${c.fl}.${c.ob}.${c.cl}.${c.bn} ${c.hn}.${c.tpt}.${c.tbn}.${c.tba}`;
+    if (got !== sections || !!c.timp !== timp || !c.str) wrong.push(`${q}: ${o.scoring} (${o.source}), expected ${sections}${timp ? " timp" : ""} str`);
+  }
+  assert.deepEqual(wrong, []);
+});
+
+test("an orchestra finds what it can play, and not what it can't", async () => {
+  const classical = encodeURIComponent("2.2.2.2 2.2.0.0 timp str");
+  const page = await api<WorksPage>(`/api/works?lineup=orchestra&orchestra=${classical}&limit=200`);
+  const titles = page.works.map((w) => `${w.composer?.name}: ${w.title}`);
+  assert.ok(titles.some((t) => /Beethoven: Symphony No\.7/.test(t)), "Beethoven 7 missing");
+  assert.ok(!titles.some((t) => /Brahms: Symphony No\.1\b/.test(t)), "Brahms 1 needs 4 horns");
+  assert.ok(page.total > 500 && (page.unscored ?? 0) > 0, `${page.total} works fit, ${page.unscored} unscored`);
+  const exact = await api<WorksPage>(`/api/works?lineup=orchestra&orchestra=${classical}&fit=exact&limit=200`);
+  assert.ok(exact.total > 50 && exact.total < page.total, `${exact.total} exactly so`);
+  const want = orchestraColumns(parseOrchestration("2.2.2.2 2.2.0.0 timp str")!);
+  for (const w of exact.works) assert.deepEqual(orchestraColumns(parseOrchestration(w.orchestration!)!), want, `${w.title}: ${w.orchestration}`);
 });
 
 test("work pages: links, line-ups and sources for well-known works", async () => {

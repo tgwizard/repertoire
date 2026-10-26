@@ -35,6 +35,8 @@ export function fixtureInput(later = false): BuildInput {
         "For violin, piano": [9],
         "For flute, oboe, piano": [13],
         "For 1 player": [8],
+        "For orchestra": [20, 21, 23],
+        "For strings": [22],
       },
       works: {
         1: imslpWork(1, "String Quartet in G minor, Op.10 (Debussy, Claude)", "Romantic", true),
@@ -46,6 +48,31 @@ export function fixtureInput(later = false): BuildInput {
         9: imslpWork(9, "Sonata in E minor, HWV 359b (Handel, George Frideric)", "Baroque"),
         12: imslpWork(12, "Summer Music, Op.31 (Barber, Samuel)", "Modern"),
         13: imslpWork(13, "Trio for Flute, Oboe and Piano (Lutosławski, Witold)", "Modern"),
+        20: imslpWork(20, "Symphony No.1, Op.68 (Brahms, Johannes)", "Romantic", true),
+        21: imslpWork(21, "Symphony No.4, Op.98 (Brahms, Johannes)", "Romantic", true),
+        22: imslpWork(22, "Serenade for Strings, Op.48 (Tchaikovsky, Pyotr)", "Romantic", true),
+        23: imslpWork(23, "Symphony in G major, Op.5 (Olsen, Ole)", "Romantic"),
+      },
+    },
+    imslpPages: {
+      pages: {
+        2: { at: T, rev: 1, duration: "20 minutes", movements: "4 movements:\n#Allegro\n#Poco adagio\n#Menuetto\n#Finale", parts: [["Violin 1", "Violin 2", "Viola", "Cello"]] },
+        // A whole set of parts, with the trombones as alto, tenor and bass; uploaded on their
+        // own, a stand-in (not another player) and a part the set lacked
+        20: {
+          at: T,
+          rev: 1,
+          instrumentation: "orchestra",
+          duration: "45 minutes",
+          movements: "4 movements:\n#Un poco sostenuto — Allegro\n#Andante sostenuto\n#Un poco allegretto e grazioso\n#Adagio — Allegro non troppo",
+          parts: [
+            ["Flute 1/2", "Oboe 1/2", "Clarinet 1/2 (B{{flat}}/A)", "Bassoon 1/2", "Contrabassoon", "Horn 1/2 (C)", "Horn 3/4 (E{{flat}})", "Trumpet 1/2 (C)", "Alto Trombone", "Tenor Trombone", "Bass Trombone", "Timpani", "Violins I", "Violins II", "Violas", "Cellos", "Basses"],
+            ["Bass Clarinet (alternate for Bassoon 1)"],
+            ["Harp"],
+          ],
+        },
+        // Only the string parts are on IMSLP: not a whole orchestra's scoring
+        23: { at: T, rev: 1, instrumentation: "orchestra", parts: [["Violins I", "Violins II", "Violas", "Cellos", "Basses"]] },
       },
     },
     eras: {},
@@ -111,6 +138,11 @@ export function fixtureInput(later = false): BuildInput {
         // Two copies of Brahms's clarinet quintet: the autograph is shown first.
         { id: "9001", person: "2", title: "Quintets", medium: "cl, vl (2), vla, vlc", numbers: "op. 115", key: "b", excerpt: false, catalogue: [], type: "Manuscript copy", holdings: [{ siglum: "A-Wn", shelf: "Mus.Hs.9" }] },
         { id: "9002", person: "2", title: "Quintets", medium: "cl, vl (2), vla, vlc", numbers: "op. 115", key: "b", excerpt: false, catalogue: [], type: "Autograph manuscript", holdings: [{ siglum: "D-B", shelf: "Mus.ms.autogr. Brahms 1" }] },
+        // A copy of the parts of a symphony IMSLP has no scoring for
+        {
+          id: "9004", person: "2", title: "Symphonies", medium: "orch", numbers: "op. 98", key: "e", excerpt: false, catalogue: [], type: "Print", holdings: [{ siglum: "D-B", shelf: null }],
+          scoring: [["fl", 2], ["fl.picc", 1], ["ob", 2], ["cl", 2], ["fag", 2], ["contra-fag", 1], ["cor", 4], ["tr", 2], ["trb", 3], ["timp", 1], ["triangolo", 1], ["vl", 2], ["vla", 1], ["vlc", 1], ["cb", 1]],
+        },
         // A work we don't have: nothing added.
         { id: "9003", person: "2", title: "Sonatas", medium: "vl, pf", numbers: "op. 999", key: null, excerpt: false, catalogue: [], type: "Print", holdings: [{ siglum: "D-B", shelf: null }] },
       ],

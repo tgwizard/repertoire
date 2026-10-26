@@ -26,11 +26,11 @@ A new database per version, rather than updating one in place, means the site sw
 
 **Worker** (`worker/`). `api.ts` routes the JSON API, `queries.ts` holds all SQL, and `pages.ts` renders work and composer pages: the app's `index.html` with title, description, Open Graph tags, schema.org JSON-LD and the page's content filled in, so links preview well and search engines see content. The app then takes over in the browser, reusing the embedded data. Queries use D1's read replicas (`withSession`), since the data is read-only.
 
-**App** (`src/`). React and Vite, static assets. A small router (`src/lib/router.tsx`) handles the finder (`/`), work, composer, search and about pages. The finder stays mounted under other pages, so going back keeps your line-up, filters and scroll position. Line-up counts for the instrument picker come from one cached request (`/api/lineups`); lists page through `/api/works`.
+**App** (`src/`). React and Vite, static assets. A small router (`src/lib/router.tsx`) handles the finder (`/`), work, composer, search and about pages. The finder stays mounted under other pages, so going back keeps your line-up, filters and scroll position; the line-up, search, filters and sort are also in the URL (`src/lib/filters.ts`), so links and reloads show the same list. A crash shows a way out (reload, start over, report it) rather than a blank page. Line-up counts for the instrument picker come from one cached request (`/api/lineups`); lists page through `/api/works`.
 
 ## Caching
 
-API responses and rendered pages are cached at Cloudflare's edge for a week and in browsers for five minutes. The edge cache key includes the dataset version and a build id, so a new dataset or app deploy never serves stale responses and needs no purge. Most requests never reach D1.
+API responses and rendered pages are cached at Cloudflare's edge for a week and in browsers for five minutes. The edge cache key includes the dataset version and a build id, and the app sends its build id with every API request, so neither the edge nor a browser hands new code a response made for the last deploy's (that once crashed the finder), and nothing needs purging. Most requests never reach D1. The dev server caches nothing.
 
 ## Local development
 
