@@ -195,7 +195,17 @@ export async function collectGarbage(namespaces: string[]): Promise<{ files: num
 // ---- Stage outputs ---------------------------------------------------------
 
 export const stagePath = (name: string) => join(CACHE_DIR, "stages", `${name}.json`);
-export const readStage = <T>(name: string) => readJson<T>(stagePath(name));
+/**
+ * A stage's output, its text composed to NFC: some sources (GND, RISM) write "ö" as "o"
+ * plus a combining mark, which would match nothing that's spelled the usual way.
+ */
+export async function readStage<T>(name: string): Promise<T | null> {
+  try {
+    return JSON.parse((await readFile(stagePath(name), "utf8")).normalize("NFC")) as T;
+  } catch {
+    return null;
+  }
+}
 export const writeStage = (name: string, value: unknown) => writeJsonAtomic(stagePath(name), value);
 
 export const DAY = 24 * 3600 * 1000;

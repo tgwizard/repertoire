@@ -20,6 +20,9 @@ test("German keys and titles", () => {
   assert.equal(gndTitle("Quartette, Violine (2), Viola, Violoncello, G 198 (A-Dur)"), "Quartet in A major, G 198");
   assert.equal(gndTitle("Quartette, Violine (2), Viola, Violoncello, Nr. 3"), "Quartet No. 3");
   assert.equal(gndTitle("Kongsgaard variations"), "Kongsgaard variations");
+  assert.equal(gndTitle("Quartette, Vl 1 2, Va, Vc, Nr. 2"), "Quartet No. 2");
+  assert.equal(gndTitle("Quintette, Fl, Ob, Klar, Hr, Fg, op. 35"), "Quintet, op. 35");
+  assert.equal(gndTitle("Quartette, Sz 40"), "Quartet, Sz 40");
   const w = { name: "Quartette, Violine (2), Viola, Violoncello, G 198 (A-Dur)", opus: ["op. 26, Nr. 4"], catalogue: ["G 198"], key: "A-Dur" } as GndWork;
   assert.equal(gndMatchTitle(w), "Quartet, G 198, Op. 26 No. 4, G 198 in A major");
 });

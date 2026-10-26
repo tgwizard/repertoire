@@ -203,7 +203,8 @@ const GERMAN: Record<string, string | Parts> = {
   Bassetthorn: "basset horn", Fagott: "bassoon", Kontrafagott: "contrabassoon", Saxofon: "saxophone", Sopransaxofon: "soprano saxophone",
   Altsaxofon: "alto saxophone", Tenorsaxofon: "tenor saxophone", Baritonsaxofon: "baritone saxophone",
   Horn: "horn", Trompete: "trumpet", Kornett: "cornet", Flügelhorn: "flugelhorn", Posaune: "trombone", Bassposaune: "bass trombone",
-  Tuba: "tuba",
+  Tuba: "tuba", Euphonium: "euphonium",
+  Saxophon: "saxophone", Altsaxophon: "alto saxophone", Vibraphon: "vibraphone", Marimbaphon: "marimba",
   Schlagzeug: "percussion", Schlagwerk: "percussion", Pauke: "timpani", Marimba: "marimba", Vibrafon: "vibraphone",
   Glockenspiel: "glockenspiel", Xylofon: "xylophone",
   Singstimme: "voice", Stimme: "voice", Gesang: "voice", Sopran: "voice", Mezzosopran: "voice", Alt: "voice", Countertenor: "voice",
@@ -248,9 +249,17 @@ const GENRES: Record<string, string> = {
   Tänze: "Dances", Fantasien: "Fantasia", Präludien: "Prelude", Fugen: "Fugue", Rhapsodien: "Rhapsody", Notturni: "Notturno",
 };
 
+// The abbreviations older uniform titles use for instruments ("Quartette, Vl 1 2, Va, Vc").
+// Single letters, and "Sz" (Bartók's catalogue), are left out: they are as often other things.
+const ABBREVIATIONS = new Set(
+  ("Kl Vl Va Vc Kb Orch Streichorch Blasorch Org Cemb Akk Bc Fl Blfl Ob Ehr Klar Fg Sax Hr Trp Pos Tb Git Lt Md Hf Schz Pk " +
+    "Vagb Sopr").split(" "),
+);
+
 const isMedium = (segment: string) => {
-  const name = segment.replace(/\s*\(\d+\)$/, "").trim();
-  return name in GERMAN || /^(Ensemble|Instrument|Melodieinstrument|Bassinstrument|Instrumentalensemble)$/.test(name);
+  // "Violine (2)", "Vl 1 2"
+  const name = segment.replace(/\s*\(\d+\)$/, "").replace(/(?: \d+)+$/, "").trim();
+  return name in GERMAN || ABBREVIATIONS.has(name) || /^(Ensemble|Instrument|Melodieinstrument|Bassinstrument|Instrumentalensemble)$/.test(name);
 };
 
 /**

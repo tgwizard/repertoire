@@ -95,8 +95,10 @@ test("smaller groups: the full group's works, then those for fewer players", asy
   await page.getByLabel(/Include smaller groups/).check();
   await expect(page).toHaveURL(/sub=1/);
   await expect(page.locator(".players-heading").first()).toHaveText("All 6 players");
-  await expect(page.locator(".players-heading").nth(1)).toHaveText("5 of your 6 players");
   await expect(works(page).first()).toContainText("Sextet");
+  // The full group's works fill the first page.
+  await page.getByRole("button", { name: /^Load more/ }).click();
+  await expect(page.locator(".players-heading").nth(1)).toHaveText("5 of your 6 players");
   // One of the smaller groups on its own.
   const group = page.getByLabel("Group", { exact: true });
   const quintet = await group.locator("option", { hasText: /^flute, oboe, clarinet, bassoon, horn \(/ }).getAttribute("value");

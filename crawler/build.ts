@@ -546,6 +546,13 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     if (w.wikidata) byWikidataWork.set(w.wikidata, w);
     if (w.gnd) byGndWork.set(w.gnd.id, w);
   }
+  // A work's GND record. A second one is kept as a link, so an id it had as a work of its
+  // own redirects here.
+  const addGnd = (w: BuildWork, id: string) => {
+    if (!w.gnd || (w.gnd.source !== "gnd" && w.gnd.id === id)) w.gnd = { id, source: "gnd" };
+    else if (w.gnd.id !== id && !w.extraLinks.some((l) => l.provider === "gnd" && l.ref === id))
+      w.extraLinks.push({ provider: "gnd", ref: id, url: gndUrl(id), label: null, source: "gnd" });
+  };
   for (const g of gnd?.works ?? []) {
     if (/\b(?:bearb|arr)\./i.test(g.name)) continue; // arrangements
     const parts = gndLineup(g.media);
@@ -555,7 +562,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     if (!w && composerKey) w = matchWork(gndMatchTitle(g), byComposer.get(composerKey) ?? []);
     if (w) {
       stats.matched.gnd++;
-      if (!w.gnd || w.gnd.source !== "gnd") w.gnd = { id: g.id, source: "gnd" };
+      addGnd(w, g.id);
       if (w.year === undefined && g.year) w.year = g.year;
       if (parts && !hasOwnInstrumentation(w) && titleFitsPlayers(w.title, parts)) addMembership(w, parts, false, "gnd", medium);
       continue;
@@ -569,10 +576,13 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     if (sameTitle.length === 1) {
       const same = sameTitle[0]!;
       stats.matched.gnd++;
-      same.gnd ??= { id: g.id, source: "gnd" };
+      addGnd(same, g.id);
       continue;
     }
-    if (sameTitle.length > 1) continue; // can't tell which
+    // A work this record brought in before stays, though it might now look like one we have:
+    // its page and id are out there.
+    const hadPage = previous.work.anchors.has(`gnd:${g.id}`);
+    if (sameTitle.length > 1 && !hadPage) continue; // can't tell which
     const key = ensembleKey(parts);
     const rivals = (byComposer.get(composerKey) ?? []).filter((x) => x.ensembles.has(key));
     // Different catalogue numbers, or different numbers in a series ("No. 2", "No. 3").
@@ -584,7 +594,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
       const n = no(x.title);
       return ours !== null && n !== null && n !== ours;
     };
-    if (rivals.length && !rivals.every(distinct)) continue;
+    if (rivals.length && !rivals.every(distinct) && !hadPage) continue;
     if (!titleFitsPlayers(title, parts)) continue;
     w = newWork(`gnd:${g.id}`, title, composerKey);
     w.gnd = { id: g.id, source: "gnd" };
@@ -659,9 +669,14 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
   const composerId = new Map(usedComposers.map((c, i) => [c.key, composerIds.ids[i]!]));
 
   const workAnchors = (w: BuildWork) =>
-    [w.imslp && `imslp:${w.imslp.pageid}`, w.wikidata && `wikidata:${w.wikidata}`, w.gnd && `gnd:${w.gnd.id}`, w.openopus && `openopus:${w.openopus}`, w.libris && `libris:${w.libris}`].filter(
-      (a): a is string => !!a,
-    );
+    [
+      w.imslp && `imslp:${w.imslp.pageid}`,
+      w.wikidata && `wikidata:${w.wikidata}`,
+      w.gnd && `gnd:${w.gnd.id}`,
+      ...w.extraLinks.filter((l) => l.provider === "gnd").map((l) => `gnd:${l.ref}`),
+      w.openopus && `openopus:${w.openopus}`,
+      w.libris && `libris:${w.libris}`,
+    ].filter((a): a is string => !!a);
   const workIds = assignIds(workList.map(workAnchors), previous.work, WORK_SCHEMES);
 
   // ---- Write ------------------------------------------------------------------

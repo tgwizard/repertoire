@@ -38,6 +38,8 @@ Next in line: more libraries. Sources without an open license (publishers, music
 
 Cache lifetimes are staggered per item so a refresh doesn't refetch everything at once, and entries a full run didn't use are deleted.
 
+The build reads stages with their text composed to Unicode NFC: GND and RISM write "ö" as "o" plus a combining mark, which otherwise matches nothing spelled the usual way (it once kept every GND work with a flute out).
+
 ## Combine
 
 The guiding rule: **a work is listed for a line-up only when a source says it's for exactly those players**, and when in doubt, keep records apart rather than merge them wrongly.
@@ -57,7 +59,7 @@ Each work's score adds up evidence that it's played (`SIGNALS` and `scoreParts` 
 
 ## Persistent ids
 
-Works and composers have short ids (`3k5esqdj`) used in URLs and the downloads, which must survive rebuilds even as sources rename, merge or split records. Each entity is anchored to the source records it came from (`imslp:<page id>`, `wikidata:<QID>`, `gnd:<id>`, `openopus:<id>`, `libris:<id>`), strongest first. A build reuses the previous dataset's id for any of its anchors; a new entity gets a hash of its strongest anchor. When two entities turn out to be one, the losing id redirects to the winner (the `redirects` table; the site and API answer with 301s). When one splits, the part with the stronger anchor keeps the id. An old id is never given to something else. `test/data/integrity.test.ts` checks ids stayed put since the previous build.
+Works and composers have short ids (`3k5esqdj`) used in URLs and the downloads, which must survive rebuilds even as sources rename, merge or split records. Each entity is anchored to the source records it came from (`imslp:<page id>`, `wikidata:<QID>`, `gnd:<id>`, `openopus:<id>`, `libris:<id>`), strongest first. A build reuses the previous dataset's id for any of its anchors; a new entity gets a hash of its strongest anchor. When two entities turn out to be one, the losing id redirects to the winner, and the merged record's anchor is kept as a link so that holds in later builds too (the `redirects` table; the site and API answer with 301s). When one splits, the part with the stronger anchor keeps the id. An old id is never given to something else. `test/data/integrity.test.ts` checks ids stayed put since the previous build.
 
 ## The dataset
 

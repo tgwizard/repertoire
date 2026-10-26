@@ -98,14 +98,25 @@ const rows = (r: any): unknown[][] => (Array.isArray(r) ? r : r.result)?.at(-1)?
 const loaded = () => {
   try {
     return rows(query("SELECT value FROM meta WHERE key = 'version'"))[0]?.[0] === version;
-  } catch {
-    return false; // no meta table yet
+  } catch (e) {
+    if (/no such table: meta/.test((e as Error).message)) return false; // meta goes in last
+    throw e;
   }
 };
 
 if (dryRun) {
   console.log(`D1: would ${db ? "check" : "create and load"} ${name}`);
 } else {
+  if (db && !loaded()) {
+    // An earlier load stopped halfway. Emptying the database means dropping 200 MB of
+    // tables, more than D1's CPU limit allows; a new one is quicker. Never the one the
+    // site is deployed with.
+    const deployed = JSON.parse(await readFile(DATASET_JSON, "utf8").catch(() => "{}")).d1?.id;
+    if (db.uuid === deployed) throw new Error(`D1: ${name} is half loaded but dataset.json serves it; not deleting it`);
+    cf(["d1", "delete", db.uuid, "--force"]);
+    console.log(`D1: deleted ${name}, left half loaded`);
+    db = undefined;
+  }
   if (!db) {
     db = cf(["d1", "create", "--name", name, "--primary-location-hint", "weur", "--read-replication-mode", "auto"], { json: true });
     db = (db as any).result ?? db;
@@ -114,10 +125,6 @@ if (dryRun) {
   if (loaded()) {
     console.log(`D1: ${name} is already loaded`);
   } else {
-    // Start from empty, in case an earlier load stopped halfway.
-    const existing = rows(query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT LIKE '%fts_%'"));
-    for (const [t] of existing) query(`DROP TABLE IF EXISTS "${t}"`);
-
     const tmp = join(CACHE_DIR, "publish", "batch.json");
     await mkdir(join(CACHE_DIR, "publish"), { recursive: true });
     const total = (await readFile(DATASET_PATH)).length;
@@ -134,7 +141,13 @@ if (dryRun) {
           cf(["d1", "raw", db!.uuid, "--batch", `@${tmp}`]);
           break;
         } catch (e) {
-          // A batch is one transaction: retrying a failed one is safe.
+          // A batch is one transaction: retrying a failed one is safe. A request can fail
+          // after D1 committed it, though; then the retry trips over its own rows. The
+          // row counts below catch anything this lets through.
+          if (attempt > 1 && /SQLITE_CONSTRAINT/.test((e as Error).message)) {
+            console.log("  a batch reported as failed had been applied");
+            break;
+          }
           if (attempt >= 4) throw e;
           console.log(`  retrying a batch (${(e as Error).message.split("\n")[1] ?? ""})`);
           await new Promise((r) => setTimeout(r, 5000 * attempt));
@@ -167,6 +180,11 @@ if (dryRun) {
   for (const t of DATA_TABLES) {
     const n = Number(rows(query(`SELECT COUNT(*) FROM ${t}`))[0]?.[0]);
     if (n !== counts[t]) throw new Error(`D1 ${name}: ${t} has ${n} rows, expected ${counts[t]}`);
+  }
+  // The search indexes have a row per work and composer.
+  for (const [fts, t] of [["works_fts", "works"], ["composers_fts", "composers"]] as const) {
+    const n = Number(rows(query(`SELECT COUNT(*) FROM ${fts}`))[0]?.[0]);
+    if (n !== counts[t]) throw new Error(`D1 ${name}: ${fts} has ${n} rows, expected ${counts[t]}`);
   }
   console.log(`D1: ${name} checked (${Object.entries(counts).map(([t, n]) => `${t} ${n}`).join(", ")})`);
 

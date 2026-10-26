@@ -38,9 +38,10 @@ test("common line-ups have plausible counts", async () => {
   const { lineups } = await api<LineupsIndex>("/api/lineups");
   const min: [string, number][] = [
     [STRING_QUARTET, 4_000],
-    [WIND_QUINTET, 250],
+    [WIND_QUINTET, 600], // IMSLP has ~275; GND the 20th-century ones
     [`${WIND_QUINTET},piano`, 25],
     ["violin,cello,piano", 1_500],
+    ["flute,piano", 2_000],
     ["trumpet:2,horn,trombone,tuba", 80],
     ["orchestra", 12_000],
     ["piano", 40_000],

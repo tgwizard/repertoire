@@ -92,6 +92,20 @@ test("works: ids, titles, years, eras, signals and scores as the rules say", () 
   assert.deepEqual(problems, []);
 });
 
+test("text is composed (NFC), so it matches and searches the way it's typed", () => {
+  const texts: [string, string][] = [
+    ["SELECT id, title || ' ' || aliases AS t FROM works", "work"],
+    ["SELECT id, name AS t FROM composers", "composer"],
+    ["SELECT entity_id AS id, coalesce(label, '') AS t FROM links", "link"],
+    ["SELECT key AS id, sources AS t FROM lineups", "line-up"],
+  ];
+  const problems: string[] = [];
+  for (const [sql, what] of texts)
+    for (const r of db.prepare(sql).iterate() as Iterable<Record<string, any>>)
+      if (r.t !== r.t.normalize("NFC") && problems.push(`${what} ${r.id}: ${r.t.slice(0, 60)}`) >= 5) break;
+  assert.deepEqual(problems, []);
+});
+
 test("composers: every one has works, and counts match", () => {
   none("SELECT c.id FROM composers c WHERE c.works != (SELECT COUNT(*) FROM works w WHERE w.composer_id = c.id)", "composers.works wrong");
   none("SELECT id FROM composers WHERE works = 0", "composers without works");
@@ -163,6 +177,8 @@ test("ids stayed put since the previous build", { skip: !existsSync(PREVIOUS_PAT
     // An id may move when a work splits; anything beyond a handful means ids aren't stable.
     assert.ok(moved <= Math.max(20, kept * 0.002), `${entity}: ${moved} anchors changed id (of ${kept + moved}), e.g. ${examples.join("; ")}`);
     const vanished: string[] = [...new Set(previous[entity].anchors.values())].filter((id) => !live.has(id) && !current[entity].redirects.has(id));
-    assert.ok(vanished.length <= Math.max(50, live.size * 0.01), `${entity}: ${vanished.length} ids vanished without a redirect`);
+    // Records do leave their sources (an IMSLP page deleted), but rarely: a work merged into
+    // another must leave a redirect, so its URL keeps working.
+    assert.ok(vanished.length <= Math.max(50, live.size * 0.001), `${entity}: ${vanished.length} ids vanished without a redirect, e.g. ${vanished.slice(0, 5).join(", ")}`);
   }
 });
