@@ -131,6 +131,21 @@ test("orchestral works an orchestra can play, or scored for exactly it; how many
   await assert.rejects(get(`/api/works?lineup=orchestra&orchestra=lots`), /400/);
 });
 
+test("facets count with the other filters applied, but not their own", async () => {
+  const fit = `orchestra=${encodeURIComponent("2.2.2.3 4.2.3.0 timp hp str")}`;
+  const all = await get<WorksPage>("/api/works?lineup=orchestra&facets=1");
+  const fitting = await get<WorksPage>(`/api/works?lineup=orchestra&facets=1&${fit}`);
+  assert.equal(all.facets!.eras.Romantic, 3);
+  assert.equal(fitting.facets!.eras.Romantic, 1); // only Brahms 1 fits
+  // Picking an era doesn't empty the other eras' counts, nor its own
+  const romantic = await get<WorksPage>(`/api/works?lineup=orchestra&facets=1&${fit}&era=Romantic`);
+  assert.deepEqual(romantic.facets!.eras, fitting.facets!.eras);
+  // Eras the other filters leave empty are still listed, with 0
+  const free = await get<WorksPage>(`/api/works?lineup=${QUARTET}&facets=1&composer=${all.facets!.composers[0]!.id}`);
+  assert.ok(Object.values(free.facets!.eras).includes(0));
+  assert.deepEqual(Object.keys(free.facets!.eras).sort(), Object.keys((await get<WorksPage>(`/api/works?lineup=${QUARTET}&facets=1`)).facets!.eras).sort());
+});
+
 test("duration: filters and sort", async () => {
   const page = await get<WorksPage>(`/api/works?composer=${(await get<SearchResults>("/api/search?q=brahms")).composers[0]!.id}&sort=duration&order=desc`);
   assert.deepEqual(page.works.map((w) => [w.title, w.duration, w.movements]).slice(0, 1), [["Symphony No.1, Op.68", 2700, 4]]);

@@ -578,6 +578,10 @@ a.load-error-retry {
   border-color: var(--ink);
 }
 
+.era-chip.empty:not(.active) {
+  opacity: 0.45;
+}
+
 .era-count {
   opacity: 0.6;
   font-variant-numeric: tabular-nums;

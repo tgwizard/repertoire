@@ -159,7 +159,7 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
   const [natural, orderBy] = ORDER[sort];
   const dir = (q.order ?? natural) === "desc" ? "DESC" : "ASC";
 
-  // Base: which works are in the list at all (facets count over this).
+  // Base: which works are in the list at all.
   const base: string[] = [];
   const baseArgs: unknown[] = [];
   const multi = !!(q.lineup && q.subsets);
@@ -173,99 +173,127 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
     base.push("s.lineup = w.lineup"); // one row per work: its main line-up
   }
   if (!q.arrangements) base.push("s.arrangement = 0");
-  // Listing a line-up, the composer facet lists every composer, whichever one is picked
-  // (a composer's own page, with no line-up, would group the whole dataset).
-  const anyComposer = q.lineup ? [...base] : base;
-  const anyComposerArgs = q.lineup ? [...baseArgs] : baseArgs;
-  if (q.composer) {
-    base.push("w.composer_id = ?");
-    baseArgs.push(q.composer);
-  }
 
-  // Filters on top.
-  const where = [...base];
-  const args = [...baseArgs];
+  // Filters on top. Each facet counts with all the others applied, but not its own, so
+  // its numbers say what picking it would give.
+  type Filter = { key: "composer" | "era" | "length" | "orchestra" | "show" | "q"; sql: string; args: unknown[] };
+  const filters: Filter[] = [];
+  if (q.composer) filters.push({ key: "composer", sql: "w.composer_id = ?", args: [q.composer] });
   if (q.eras?.length) {
     const known = q.eras.filter((e) => (ERAS as readonly string[]).includes(e));
-    const parts = [];
+    const parts: string[] = [];
+    const args: unknown[] = [];
     if (known.length) {
       parts.push("w.era IN (SELECT value FROM json_each(?))");
       args.push(JSON.stringify(known));
     }
     if (q.eras.includes("Unknown")) parts.push("w.era IS NULL");
-    if (parts.length) where.push(`(${parts.join(" OR ")})`);
+    if (parts.length) filters.push({ key: "era", sql: `(${parts.join(" OR ")})`, args });
   }
+  const length: string[] = [];
+  const lengthArgs: unknown[] = [];
   if (q.minDuration) {
-    where.push("w.duration >= ?");
-    args.push(q.minDuration * 60);
+    length.push("w.duration >= ?");
+    lengthArgs.push(q.minDuration * 60);
   }
   if (q.maxDuration) {
-    where.push("w.duration < ?");
-    args.push(q.maxDuration * 60);
+    length.push("w.duration < ?");
+    lengthArgs.push(q.maxDuration * 60);
   }
-  if (q.unknownDuration) where.push("w.duration IS NULL");
+  if (q.unknownDuration) length.push("w.duration IS NULL");
+  if (length.length) filters.push({ key: "length", sql: length.join(" AND "), args: lengthArgs });
   // An orchestra to fit: rows for an orchestral line-up need a scoring that fits; string
   // orchestra works need strings; anything else (a soloist's part) is fine as it is.
   if (q.orchestra) {
     const exact = q.fit === "exact";
     const columns = Object.entries(orchestraColumns(q.orchestra));
     const fits = `o.work_id IS NOT NULL AND ${columns.map(([c]) => `o.${c} ${exact ? "=" : "<="} ?`).join(" AND ")}`;
-    where.push(`(CASE WHEN ${ORCHESTRAL} THEN ${fits} WHEN s.lineup = 'strings' THEN ? ELSE ? END)`);
-    args.push(...columns.map(([, n]) => n), q.orchestra.str && !exact ? 1 : 0, exact ? 0 : 1);
+    filters.push({
+      key: "orchestra",
+      sql: `(CASE WHEN ${ORCHESTRAL} THEN ${fits} WHEN s.lineup = 'strings' THEN ? ELSE ? END)`,
+      args: [...columns.map(([, n]) => n), q.orchestra.str && !exact ? 1 : 0, exact ? 0 : 1],
+    });
   }
-  if (q.show === "core") where.push(`w.score >= ${CORE_SCORE}`);
-  if (q.show === "free") where.push("w.free = 1");
+  if (q.show === "core") filters.push({ key: "show", sql: `w.score >= ${CORE_SCORE}`, args: [] });
+  if (q.show === "free") filters.push({ key: "show", sql: "w.free = 1", args: [] });
   const fts = q.q ? ftsQuery(q.q) : null;
   if (q.q && !fts) return { total: 0, offset, works: [], facets: null };
-  if (fts) {
-    where.push("w.n IN (SELECT rowid FROM works_fts WHERE works_fts MATCH ?)");
-    args.push(fts);
-  }
+  if (fts) filters.push({ key: "q", sql: "w.n IN (SELECT rowid FROM works_fts WHERE works_fts MATCH ?)", args: [fts] });
 
   const cond = (c: string[]) => `WHERE ${c.join(" AND ")}`;
+  /** The filters but one, as SQL and its arguments; the orchestrations join if needed */
+  const applied = (except?: Filter["key"]) => {
+    const fs = filters.filter((f) => f.key !== except);
+    return {
+      sql: fs.length ? fs.map((f) => f.sql).join(" AND ") : "1",
+      args: fs.flatMap((f) => f.args),
+      from: fs.some((f) => f.key === "orchestra") ? FROM : CORE,
+    };
+  };
+  const all = applied();
+  const where = [...base, all.sql];
+  const args = [...baseArgs, ...all.args];
+
   // With smaller groups a work can be listed for several of them: keep the largest.
   const select = multi
     ? `SELECT ${SUMMARY.replace("s.players", "MAX(s.players) AS players")} ${FROM} ${cond(where)} GROUP BY s.work_id`
     : `SELECT ${SUMMARY} ${FROM} ${cond(where)}`;
   const stmts = [
     db.prepare(`${select} ORDER BY ${orderBy(dir)} LIMIT ? OFFSET ?`).bind(...args, limit, offset),
-    db.prepare(`SELECT COUNT(DISTINCT s.work_id) AS n ${q.orchestra ? FROM : CORE} ${cond(where)}`).bind(...args),
+    db.prepare(`SELECT COUNT(DISTINCT s.work_id) AS n ${all.from} ${cond(where)}`).bind(...args),
   ];
   if (q.facets) {
+    // Every era the line-up has (so the chips stay put), counted with the other filters
+    const era = applied("era");
+    // A composer's own page (no line-up, no search) lists just them: listing every
+    // composer would group the whole dataset.
+    const composer = q.lineup || fts ? applied("composer") : all;
+    const show = applied("show");
+    const len = applied("length");
     stmts.push(
-      db.prepare(`SELECT w.era AS era, COUNT(DISTINCT w.id) AS n ${CORE} ${cond(base)} GROUP BY w.era`).bind(...baseArgs),
       db
-        .prepare(`SELECT c.id AS id, c.name AS name, COUNT(DISTINCT w.id) AS n ${CORE} ${cond([...anyComposer, "c.id IS NOT NULL"])} GROUP BY c.id ORDER BY n DESC, c.sort_name LIMIT 300`)
-        .bind(...anyComposerArgs),
+        .prepare(`SELECT w.era AS era, COUNT(DISTINCT CASE WHEN ${era.sql} THEN w.id END) AS n ${era.from} ${cond(base)} GROUP BY w.era`)
+        .bind(...era.args, ...baseArgs),
+      db
+        .prepare(`SELECT c.id AS id, c.name AS name, COUNT(DISTINCT w.id) AS n ${composer.from} ${cond([...base, composer.sql, "c.id IS NOT NULL"])} GROUP BY c.id ORDER BY n DESC, c.sort_name LIMIT 300`)
+        .bind(...baseArgs, ...composer.args),
+      db
+        .prepare(`SELECT SUM(score >= ${CORE_SCORE}) AS core, SUM(free) AS free FROM (SELECT DISTINCT w.id, w.score, w.free ${show.from} ${cond([...base, show.sql])})`)
+        .bind(...baseArgs, ...show.args),
       db
         .prepare(
-          `SELECT SUM(score >= ${CORE_SCORE}) AS core, SUM(free) AS free, SUM(duration IS NULL) AS unknown_length,
+          `SELECT SUM(duration IS NULL) AS unknown_length,
            ${LENGTHS.map((l, i) => `SUM(duration >= ${l.min * 60}${l.max ? ` AND duration < ${l.max * 60}` : ""}) AS length_${i}`).join(", ")}
-           FROM (SELECT DISTINCT w.id, w.score, w.free, w.duration ${CORE} ${cond(base)})`,
+           FROM (SELECT DISTINCT w.id, w.duration ${len.from} ${cond([...base, len.sql])})`,
         )
-        .bind(...baseArgs),
+        .bind(...baseArgs, ...len.args),
     );
     if (multi) {
       stmts.push(
         db
-          .prepare(`SELECT s.lineup AS key, l.description AS description, l.players AS players, COUNT(*) AS n FROM scorings s JOIN lineups l ON l.key = s.lineup JOIN works w ON w.id = s.work_id ${cond(base)} GROUP BY s.lineup ORDER BY l.players DESC, n DESC LIMIT 200`)
-          .bind(...baseArgs),
+          .prepare(
+            `SELECT s.lineup AS key, l.description AS description, l.players AS players, COUNT(*) AS n ${all.from} JOIN lineups l ON l.key = s.lineup ${cond(where)} GROUP BY s.lineup ORDER BY l.players DESC, n DESC LIMIT 200`,
+          )
+          .bind(...args),
       );
     }
   }
-  if (q.orchestra) stmts.push(db.prepare(`SELECT COUNT(DISTINCT s.work_id) AS n ${FROM} ${cond([...base, ORCHESTRAL, "o.work_id IS NULL"])}`).bind(...baseArgs));
+  if (q.orchestra) {
+    const other = applied("orchestra");
+    stmts.push(db.prepare(`SELECT COUNT(DISTINCT s.work_id) AS n ${FROM} ${cond([...base, other.sql, ORCHESTRAL, "o.work_id IS NULL"])}`).bind(...baseArgs, ...other.args));
+  }
   const results = await db.batch<Row>(stmts);
   const unscored = q.orchestra ? results.pop()!.results[0]?.n : undefined;
-  const [rows, count, eras, composers, totals, lineups] = results;
+  const [rows, count, eras, composers, shows, lengths, lineups] = results;
   let facets: Facets | null = null;
   if (q.facets) {
     facets = {
       eras: Object.fromEntries(eras!.results.map((r) => [r.era ?? "Unknown", r.n])),
       composers: composers!.results.map((r) => ({ id: r.id, name: r.name, count: r.n })),
       lineups: (lineups?.results ?? []).map((r) => ({ key: r.key, description: r.description, players: r.players, count: r.n })),
-      core: totals!.results[0]?.core ?? 0,
-      free: totals!.results[0]?.free ?? 0,
-      lengths: { known: LENGTHS.map((_, i) => totals!.results[0]?.[`length_${i}`] ?? 0), unknown: totals!.results[0]?.unknown_length ?? 0 },
+      core: shows!.results[0]?.core ?? 0,
+      free: shows!.results[0]?.free ?? 0,
+      lengths: { known: LENGTHS.map((_, i) => lengths!.results[0]?.[`length_${i}`] ?? 0), unknown: lengths!.results[0]?.unknown_length ?? 0 },
     };
   }
   return { total: count!.results[0]?.n ?? 0, offset, works: rows!.results.map(toSummary), facets, ...(unscored !== undefined && { unscored }) };

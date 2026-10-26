@@ -232,7 +232,9 @@ export const LENGTHS: { label: string; min: number; max: number }[] = [
   { label: "Over 40 min", min: 40, max: 0 },
 ];
 
+/** Counts for each filter's options, with the other filters applied (but not its own) */
 export interface Facets {
+  /** Every era the line-up has, 0 where the other filters leave none */
   eras: Partial<Record<Era | "Unknown", number>>;
   /** Works per LENGTHS entry, and how many have no known length */
   lengths: { known: number[]; unknown: number };

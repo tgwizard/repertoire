@@ -140,7 +140,15 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
 
   const toggleEra = (e: string) => set({ eras: eras.includes(e) ? eras.filter((x) => x !== e) : [...eras, e].sort() });
 
-  const eraOptions = [...ERAS, UNKNOWN].filter((e) => f?.eras[e as keyof typeof f.eras]);
+  // Every era the line-up has stays (so the chips don't move); those the other filters
+  // leave empty are dimmed
+  const eraOptions = [...ERAS, UNKNOWN].filter((e) => f && e in f.eras);
+  // The picked composer stays in the list even when the other filters leave them none
+  const composerNames = useRef(new Map<string, string>());
+  for (const c of f?.composers ?? []) composerNames.current.set(c.id, c.name);
+  const composerOptions = [...(f?.composers ?? [])];
+  if (composer && !composerOptions.some((c) => c.id === composer))
+    composerOptions.unshift({ id: composer, name: composerNames.current.get(composer) ?? "This composer", count: 0 });
   const description = describe(parseEnsembleKey(lineup));
   const listTotal = filtering ? matching : smaller && !within ? matching : total;
 
@@ -294,7 +302,12 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
                 </span>
                 <div className="era-chips">
                   {eraOptions.map((e) => (
-                    <button key={e} className={`era-chip${eras.includes(e) ? " active" : ""}`} aria-pressed={eras.includes(e)} onClick={() => toggleEra(e)}>
+                    <button
+                      key={e}
+                      className={`era-chip${eras.includes(e) ? " active" : ""}${f?.eras[e as keyof typeof f.eras] ? "" : " empty"}`}
+                      aria-pressed={eras.includes(e)}
+                      onClick={() => toggleEra(e)}
+                    >
                       {e} <span className="era-count">{fmt.format(f?.eras[e as keyof typeof f.eras] ?? 0)}</span>
                     </button>
                   ))}
@@ -309,7 +322,7 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
               </label>
               <select id="filter-composer" value={composer} onChange={(e) => set({ composer: e.target.value })}>
                 <option value="">All composers{f ? ` (${fmt.format(f.composers.length)}${f.composers.length === 300 ? "+" : ""})` : ""}</option>
-                {(f?.composers ?? []).map((c) => (
+                {composerOptions.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name} ({c.count})
                   </option>
