@@ -42,7 +42,7 @@ export function SearchResults({ q }: { q: string }) {
     <section className="results" aria-label="Search results">
       <div className="results-head">
         <h2>
-          {first.data ? fmt.format(total) : "…"} <span className="muted">{total === 1 ? "work matches" : "works match"} “{q}”</span>
+          {first.data ? fmt.format(total) : "…"} <span className="muted">{total === 1 ? "work" : "works"} matching “{q}”</span>
         </h2>
         <p className="results-sub">In every line-up. Pick players to narrow it down.</p>
       </div>

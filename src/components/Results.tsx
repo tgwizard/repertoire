@@ -92,6 +92,10 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
     () => (withOrchestra && typed ? readOrchestration(typed) : { orchestration: null, unreadable: null }),
     [withOrchestra, typed],
   );
+  // While what's typed can't be read, the list keeps the last scoring that could
+  const lastOurs = useRef(ours);
+  if (!unreadable) lastOurs.current = ours;
+  const applied = unreadable ? lastOurs.current : ours;
 
   const params = useMemo(() => {
     const p = new URLSearchParams();
@@ -105,8 +109,8 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
     for (const e of [...eras].sort()) p.append("era", e);
     if (show !== "all") p.set("show", show);
     if (q) p.set("q", q);
-    if (ours) p.set("orchestra", formatOrchestration(ours));
-    if (ours && exact) p.set("fit", "exact");
+    if (applied) p.set("orchestra", formatOrchestration(applied));
+    if (applied && exact) p.set("fit", "exact");
     if (length === "unknown") p.set("duration", "unknown");
     else if (length) {
       const { min, max } = LENGTHS.find((l) => lengthKey(l) === length)!;
@@ -116,10 +120,10 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
     // Group sizes only vary with smaller groups.
     setSortParams(p, sorting.sort === "players" && (!smaller || within) ? { sort: "rank" } : sorting);
     return p.toString().replaceAll("%2C", ",");
-  }, [lineup, within, smaller, minPlayers, includeArr, composer, eras, show, q, ours, exact, length, sorting.sort, sorting.order]);
+  }, [lineup, within, smaller, minPlayers, includeArr, composer, eras, show, q, applied, exact, length, sorting.sort, sorting.order]);
 
   const { works, total: matching, facets, unscored, loading, error, hasMore, loadMore, retry } = useWorks(params);
-  const filtering = q !== "" || eras.length > 0 || composer !== "" || show !== "all" || !!ours || length !== "";
+  const filtering = q !== "" || eras.length > 0 || composer !== "" || show !== "all" || !!applied || length !== "";
   // Facets describe the unfiltered list; keep the last ones while a new query loads.
   const lastFacets = useRef(facets);
   if (facets) lastFacets.current = facets;
@@ -141,30 +145,20 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
   return (
     <section className="results" aria-label="Works" ref={sectionRef}>
       <div className="results-head">
+        {/* One line however it's filtered, so filtering doesn't move the list */}
         <h2>
-          {filtering ? (
-            <>
-              {fmt.format(matching)} <span className="muted">{matching === 1 ? "work matches" : "works match"}{q && ` “${q}”`}</span>
-            </>
-          ) : (
-            <>
-              {fmt.format(listTotal)}{" "}
-              <span className="muted">
-                {listTotal === 1 ? "work" : "works"} for {within ? describe(parseEnsembleKey(within)) : smaller ? `${description} and smaller groups` : description}
-              </span>
-            </>
-          )}
+          {fmt.format(filtering ? matching : listTotal)}{" "}
+          <span className="muted">
+            {q ? `${matching === 1 ? "work" : "works"} matching “${q}”` : filtering ? `matching ${matching === 1 ? "work" : "works"}` : listTotal === 1 ? "work" : "works"} for{" "}
+            {within ? describe(parseEnsembleKey(within)) : smaller ? `${description} and smaller groups` : description}
+          </span>
           {!smaller && <LineupSources lineup={lineup} />}
         </h2>
-        {filtering && (
+        {q && (
           <p className="results-sub">
-            For {description}
-            {smaller ? " and smaller groups" : ""}.{" "}
-            {q && (
-              <button className="link-button" onClick={onSearchEverywhere}>
-                Search all line-ups instead
-              </button>
-            )}
+            <button className="link-button" onClick={onSearchEverywhere}>
+              Search all line-ups instead
+            </button>
           </p>
         )}
       </div>
@@ -250,17 +244,18 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
             <option value="within">What it can play</option>
             <option value="exact">Scored exactly so</option>
           </select>
-          {unreadable ? (
-            <p id="orchestra-hint" className="orchestra-hint invalid" role="alert">
-              <strong>Couldn't read “{unreadable}”.</strong> Write it like{" "}
-              <button type="button" className="link-button" onClick={() => onOrchestraChange(EXAMPLES[1]![1])}>
-                <code>{EXAMPLES[1]![1]}</code>
-              </button>
-              ; the ? above explains how.
-            </p>
-          ) : (
-            ours && (
-              <p id="orchestra-hint" className="orchestra-hint">
+          {/* Always there, two lines tall, so typing doesn't move the page */}
+          <p id="orchestra-hint" className={`orchestra-hint${unreadable ? " invalid" : ""}`} aria-live="polite">
+            {unreadable ? (
+              <>
+                <strong>Couldn't read “{unreadable}”.</strong> Write it like{" "}
+                <button type="button" className="link-button" onClick={() => onOrchestraChange(EXAMPLES[1]![1])}>
+                  <code>{EXAMPLES[1]![1]}</code>
+                </button>
+                ; the ? above explains how.
+              </>
+            ) : ours ? (
+              <>
                 {describeOrchestration(ours)}.
                 {unscored > 0 && (
                   <span className="muted">
@@ -268,9 +263,17 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
                     Leaves out {fmt.format(unscored)} orchestral {unscored === 1 ? "work" : "works"} whose scoring we don't know.
                   </span>
                 )}
-              </p>
-            )
-          )}
+              </>
+            ) : (
+              <>
+                Write it like{" "}
+                <button type="button" className="link-button" onClick={() => onOrchestraChange(EXAMPLES[1]![1])}>
+                  <code>{EXAMPLES[1]![1]}</code>
+                </button>{" "}
+                to see what it can play; the ? explains how.
+              </>
+            )}
+          </p>
         </div>
       )}
 

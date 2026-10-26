@@ -688,7 +688,7 @@ a.load-error-retry {
 
 /* ---- A "?" with an explanation that opens on hover or click ---- */
 
-.results-head {
+.results-head h2 {
   position: relative;
 }
 
@@ -721,7 +721,7 @@ a.load-error-retry {
   position: absolute;
   z-index: 20;
   top: calc(100% + 6px);
-  left: 0;
+  left: 12px;
   right: 0;
   max-width: 640px;
   padding: 12px 14px;
@@ -973,7 +973,6 @@ code {
 /* ---- An orchestra's scoring ---- */
 
 .orchestra-row {
-  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
@@ -1007,8 +1006,15 @@ code {
 }
 
 .orchestra-label {
+  position: relative;
   display: flex;
   align-items: center;
+}
+
+/* Opens right under its "?", over the field */
+.orchestra-label .info-popover {
+  right: auto;
+  width: min(560px, calc(100vw - 48px));
 }
 
 .orchestra-label .info {
@@ -1020,19 +1026,28 @@ code {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* The same box in every state (two lines tall), so typing never moves the page */
 .orchestra-hint {
   flex-basis: 100%;
+  box-sizing: border-box;
+  min-height: calc(2 * 1.45em + 12px);
   margin: 0;
-  font-size: 0.82rem;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  line-height: 1.45;
   color: var(--muted);
 }
 
+@media (max-width: 600px) {
+  .orchestra-hint {
+    min-height: calc(3 * 1.45em + 12px);
+  }
+}
+
 .orchestra-hint.invalid {
-  padding: 10px 12px;
-  border-radius: 8px;
   background: var(--accent-soft);
   color: var(--ink);
-  font-size: 0.875rem;
 }
 
 .orchestra-hint code,
