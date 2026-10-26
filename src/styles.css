@@ -235,7 +235,7 @@ a.load-error-retry {
 
 .layout > .main-search {
   grid-area: search;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .layout > .main {
@@ -861,6 +861,11 @@ code {
     grid-template-rows: auto;
     grid-template-areas: "search" "side" "main";
     gap: 0;
+  }
+
+  /* With players picked, they come first, then the box with search and filters */
+  .layout.picked {
+    grid-template-areas: "side" "search" "main";
   }
 
   .layout > .main-search {
@@ -1526,8 +1531,18 @@ select:not([multiple]):hover {
   background-size: 9px 6px;
 }
 
-/* As wide as "All composers (300+)", not the longest name in it */
-.filter-box #filter-composer {
-  width: 210px;
+/* As wide as "All composers (300+)", not the longest name (or line-up) in it */
+.filter-box #filter-composer,
+.filter-box #filter-lineup {
+  width: 190px;
   max-width: 100%;
+}
+
+/* A list's filters, drawn into the search's box: part of its column of rows */
+.filter-slot {
+  display: contents;
+}
+
+.search-box input::-webkit-search-cancel-button {
+  cursor: pointer;
 }

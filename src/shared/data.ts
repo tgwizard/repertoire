@@ -239,7 +239,8 @@ export interface Facets {
   /** Works per LENGTHS entry, and how many have no known length */
   lengths: { known: number[]; unknown: number };
   composers: { id: string; name: string; count: number }[];
-  /** Sub-line-ups, when listing a group's smaller groups too */
+  /** Sub-line-ups, when listing a group's smaller groups too; searching without a
+   * line-up, the line-ups the matches are for */
   lineups: { key: string; description: string; players: number; count: number }[];
   core: number;
   free: number;
@@ -308,7 +309,7 @@ export interface Meta {
   stats: DatasetStats | null;
 }
 
-export type WorkSort = "rank" | "players" | "chronological" | "composer" | "title" | "duration";
+export type WorkSort = "relevance" | "rank" | "players" | "chronological" | "composer" | "title" | "duration";
 export type SortOrder = "asc" | "desc";
 
 // ---- Published datasets ----------------------------------------------------

@@ -146,6 +146,22 @@ test("facets count with the other filters applied, but not their own", async () 
   assert.deepEqual(Object.keys(free.facets!.eras).sort(), Object.keys((await get<WorksPage>(`/api/works?lineup=${QUARTET}&facets=1`)).facets!.eras).sort());
 });
 
+test("searching without a line-up: best matches first, with filters and the line-ups they're for", async () => {
+  const page = await get<WorksPage>("/api/works?q=brahms&sort=relevance&facets=1&arrangements=1");
+  const search = await get<SearchResults>("/api/search?q=brahms&limit=50");
+  assert.deepEqual(page.works.map((w) => w.id), search.works.map((w) => w.id)); // the search's own order
+  assert.equal(page.total, search.total);
+  assert.ok(page.facets!.lineups.some((l) => l.key === "orchestra" && l.count === 2), JSON.stringify(page.facets!.lineups));
+  assert.deepEqual(page.facets!.composers.map((c) => c.name), ["Johannes Brahms"]);
+  const romantic = await get<WorksPage>("/api/works?q=brahms&sort=relevance&facets=1&arrangements=1&lineup=&era=Romantic");
+  assert.ok(romantic.total > 0 && romantic.works.every((w) => w.era === "Romantic"));
+  // Without a search, best match means nothing: established first
+  assert.deepEqual(
+    (await get<WorksPage>(`/api/works?lineup=${QUARTET}&sort=relevance`)).works.map((w) => w.id),
+    (await get<WorksPage>(`/api/works?lineup=${QUARTET}`)).works.map((w) => w.id),
+  );
+});
+
 test("duration: filters and sort", async () => {
   const page = await get<WorksPage>(`/api/works?composer=${(await get<SearchResults>("/api/search?q=brahms")).composers[0]!.id}&sort=duration&order=desc`);
   assert.deepEqual(page.works.map((w) => [w.title, w.duration, w.movements]).slice(0, 1), [["Symphony No.1, Op.68", 2700, 4]]);

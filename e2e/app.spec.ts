@@ -71,6 +71,40 @@ test("search everything, then narrow it down by picking players", async ({ page 
   noErrors();
 });
 
+test("typing a search keeps the focus while results come in", async ({ page }) => {
+  await page.goto("/");
+  const box = page.getByRole("searchbox", { name: "Search works and composers" });
+  await box.click();
+  await page.keyboard.type("bra");
+  await expect(page.locator(".results-head h2")).toContainText("matching “bra”");
+  await page.keyboard.type("hms");
+  await expect(box).toBeFocused();
+  await expect(box).toHaveValue("brahms");
+  await expect(page.locator(".results-head h2")).toContainText("matching “brahms”");
+  // Picking players doesn't move it either
+  await page.getByRole("button", { name: /^String quartet \d/ }).click();
+  await box.click();
+  await page.keyboard.type(" op");
+  await expect(box).toBeFocused();
+  await expect(box).toHaveValue("brahms op");
+});
+
+test("searching everything has filters too, and a line-up to narrow it to", async ({ page }) => {
+  const noErrors = watchErrors(page);
+  await page.goto("/?q=brahms");
+  await expect(page.getByRole("combobox", { name: "Sort" })).toHaveValue("relevance");
+  await page.getByRole("button", { name: /^Romantic \d/ }).click();
+  await expect(page).toHaveURL(/q=brahms&era=Romantic|era=Romantic.*q=brahms/);
+  for (const badge of await works(page).locator(".work-meta .badge").allTextContents()) expect(badge).toBe("Romantic");
+  const lineup = page.getByRole("combobox", { name: "Line-up" });
+  const quartet = await lineup.locator("option", { hasText: /^2 violins, viola, cello \(/ }).getAttribute("value");
+  await lineup.selectOption(quartet!);
+  await expect(page).toHaveURL(/i=violin:2,viola,cello/);
+  await expect(page).toHaveURL(/era=Romantic/); // the filters come along
+  await expect(page.locator(".results-head h2")).toContainText("matching “brahms” for 2 violins, viola, cello");
+  noErrors();
+});
+
 test("search finds catalogue numbers; old /search links still work", async ({ page }) => {
   await page.goto("/search?q=k581");
   await expect(page).toHaveURL(/\/\?q=k581$/);

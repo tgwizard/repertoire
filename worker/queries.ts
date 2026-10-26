@@ -147,6 +147,8 @@ const ORDER: Record<WorkSort, [SortOrder, (d: string) => string]> = {
   composer: ["asc", (d) => `c.sort_name IS NULL, c.sort_name COLLATE NOCASE ${d}, w.title COLLATE NOCASE, w.n`],
   title: ["asc", (d) => `w.title COLLATE NOCASE ${d}, w.n`],
   duration: ["asc", (d) => `w.duration IS NULL, w.duration ${d}, w.score DESC, w.n`],
+  // Text relevance, nudged by how established the work is (needs the search's join, below)
+  relevance: ["asc", (d) => `f.rank - w.score * 0.5 ${d}, w.n`],
 };
 
 /** Rows listed for a line-up with an orchestra in it ("orchestra*2", "voices with orchestra" too) */
@@ -155,13 +157,17 @@ const ORCHESTRAL = "s.lineup LIKE '%orchestra%'";
 export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery): Promise<WorksPage> {
   const limit = Math.min(Math.max(q.limit ?? 50, 1), 200);
   const offset = Math.min(Math.max(q.offset ?? 0, 0), 100_000);
-  const sort = q.sort && q.sort in ORDER ? q.sort : "rank";
+  const fts = q.q ? ftsQuery(q.q) : null;
+  if (q.q && !fts) return { total: 0, offset, works: [], facets: null };
+  const sort = q.sort && q.sort in ORDER && (q.sort !== "relevance" || fts) ? q.sort : "rank";
   const [natural, orderBy] = ORDER[sort];
   const dir = (q.order ?? natural) === "desc" ? "DESC" : "ASC";
 
-  // Base: which works are in the list at all.
+  // Base: which works are in the list at all. Searching without a line-up, the search
+  // belongs to it: facets then group only the matches, never the whole dataset.
   const base: string[] = [];
   const baseArgs: unknown[] = [];
+  const MATCHES = "w.n IN (SELECT rowid FROM works_fts WHERE works_fts MATCH ?)";
   const multi = !!(q.lineup && q.subsets);
   if (q.lineup && q.subsets) {
     base.push("s.lineup IN (SELECT value FROM json_each(?))");
@@ -173,6 +179,11 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
     base.push("s.lineup = w.lineup"); // one row per work: its main line-up
   }
   if (!q.arrangements) base.push("s.arrangement = 0");
+  const searching = !q.lineup && fts;
+  if (searching) {
+    base.push(MATCHES);
+    baseArgs.push(fts);
+  }
 
   // Filters on top. Each facet counts with all the others applied, but not its own, so
   // its numbers say what picking it would give.
@@ -216,9 +227,7 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
   }
   if (q.show === "core") filters.push({ key: "show", sql: `w.score >= ${CORE_SCORE}`, args: [] });
   if (q.show === "free") filters.push({ key: "show", sql: "w.free = 1", args: [] });
-  const fts = q.q ? ftsQuery(q.q) : null;
-  if (q.q && !fts) return { total: 0, offset, works: [], facets: null };
-  if (fts) filters.push({ key: "q", sql: "w.n IN (SELECT rowid FROM works_fts WHERE works_fts MATCH ?)", args: [fts] });
+  if (fts && !searching) filters.push({ key: "q", sql: MATCHES, args: [fts] });
 
   const cond = (c: string[]) => `WHERE ${c.join(" AND ")}`;
   /** The filters but one, as SQL and its arguments; the orchestrations join if needed */
@@ -235,11 +244,13 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
   const args = [...baseArgs, ...all.args];
 
   // With smaller groups a work can be listed for several of them: keep the largest.
+  const relevance = sort === "relevance";
+  const rowsFrom = relevance ? `${FROM} JOIN (SELECT rowid, rank FROM works_fts WHERE works_fts MATCH ? AND rank MATCH 'bm25(10.0, 6.0, 4.0, 8.0)') f ON f.rowid = w.n` : FROM;
   const select = multi
-    ? `SELECT ${SUMMARY.replace("s.players", "MAX(s.players) AS players")} ${FROM} ${cond(where)} GROUP BY s.work_id`
-    : `SELECT ${SUMMARY} ${FROM} ${cond(where)}`;
+    ? `SELECT ${SUMMARY.replace("s.players", "MAX(s.players) AS players")} ${rowsFrom} ${cond(where)} GROUP BY s.work_id`
+    : `SELECT ${SUMMARY} ${rowsFrom} ${cond(where)}`;
   const stmts = [
-    db.prepare(`${select} ORDER BY ${orderBy(dir)} LIMIT ? OFFSET ?`).bind(...args, limit, offset),
+    db.prepare(`${select} ORDER BY ${orderBy(dir)} LIMIT ? OFFSET ?`).bind(...(relevance ? [fts] : []), ...args, limit, offset),
     db.prepare(`SELECT COUNT(DISTINCT s.work_id) AS n ${all.from} ${cond(where)}`).bind(...args),
   ];
   if (q.facets) {
@@ -268,7 +279,17 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
         )
         .bind(...baseArgs, ...len.args),
     );
-    if (multi) {
+    if (searching) {
+      // The line-ups the matches are for: every one a work is listed for, not only its main
+      const lineupBase = base.filter((c) => c !== "s.lineup = w.lineup");
+      stmts.push(
+        db
+          .prepare(
+            `SELECT s.lineup AS key, l.description AS description, l.players AS players, COUNT(DISTINCT s.work_id) AS n ${all.from} JOIN lineups l ON l.key = s.lineup ${cond([...lineupBase, all.sql])} GROUP BY s.lineup ORDER BY n DESC, l.players LIMIT 60`,
+          )
+          .bind(...baseArgs, ...all.args),
+      );
+    } else if (multi) {
       stmts.push(
         db
           .prepare(

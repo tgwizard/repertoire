@@ -14,8 +14,8 @@ export function ComposerPage({ id }: { id: string }) {
   const { data: c, error } = useApi<ComposerDetail>(`/api/composers/${id}`);
   const [lineup, setLineup] = useState(() => new URLSearchParams(location.search).get("lineup") ?? "");
   const [sorting, setSorting] = useState<Sorting>(() => {
-    const { sort, order } = readFilters(new URLSearchParams(location.search), false);
-    return { sort, order };
+    const { sort, order } = readFilters(new URLSearchParams(location.search));
+    return { sort: sort ?? "rank", order };
   });
   const [allLineups, setAllLineups] = useState(false);
 

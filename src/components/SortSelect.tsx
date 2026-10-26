@@ -7,6 +7,7 @@ export interface Sorting {
 }
 
 const OPTIONS: [WorkSort, SortOrder | undefined, string][] = [
+  ["relevance", undefined, "Best match"],
   ["players", undefined, "Largest groups first"],
   ["players", "asc", "Smallest groups first"],
   ["rank", undefined, "Most established first"],

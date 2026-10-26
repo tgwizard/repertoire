@@ -17,7 +17,7 @@ function readUrl() {
     ensemble: decodeEnsemble(p.get("i")),
     includeArr: p.get("arr") === "1",
     smaller,
-    filters: readFilters(p, smaller),
+    filters: readFilters(p),
     q: p.get("q") ?? "",
     orchestra: p.get("orch") ?? "",
     exact: p.get("fit") === "exact",
@@ -45,12 +45,12 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
   const [filters, setFilters] = useState<Filters>(() => readUrl().filters);
   const changeEnsemble = (e: Ensemble) => {
     setEnsemble(e);
-    setFilters(defaultFilters(smaller));
+    setFilters(defaultFilters());
   };
   // Listing smaller groups too: largest first, all of them
   const changeSmaller = (v: boolean) => {
     setSmaller(v);
-    setFilters((f) => ({ ...f, sort: defaultFilters(v).sort, order: undefined, within: "" }));
+    setFilters((f) => ({ ...f, sort: undefined, order: undefined, within: "" }));
   };
   const q = useDebounced(query.trim(), 250);
 
@@ -75,7 +75,7 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
     if (enc) p.set("i", enc);
     if (includeArr) p.set("arr", "1");
     if (smaller && enc) p.set("sub", "1");
-    if (enc) writeFilters(p, filters, smaller);
+    if (enc || q) writeFilters(p, filters, smaller && !!enc);
     if (q) p.set("q", q);
     const orch = hasOrchestra(ensembleKey(ensemble)) ? orchestra.trim() : "";
     if (orch) p.set("orch", orch);
@@ -105,12 +105,29 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
     }).length;
   }, [index, settledKey, includeArr]);
 
-  // Listing a line-up, the search sits with the filters (in Results); otherwise on its own.
-  const listing = !!settledKey && Object.keys(ensemble).length > 0 && (count(ensemble) > 0 || smaller);
-  const search = <SearchField id="search" value={query} onChange={setQuery} narrowed={Object.keys(ensemble).length > 0} />;
+  // The search box stays put (moving it would lose focus mid-word); a list of works draws
+  // its filters into it, below the search.
+  const picked = Object.keys(ensemble).length > 0;
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
 
   const main = () => {
-    if (Object.keys(ensemble).length === 0) return q ? <SearchResults q={q} /> : <Intro meta={meta} />;
+    if (!picked) {
+      if (!q) return <Intro meta={meta} />;
+      return (
+        <SearchResults
+          q={q}
+          slot={slot}
+          filters={filters}
+          onFiltersChange={setFilters}
+          includeArr={includeArr}
+          // Narrowing to a line-up keeps the search and filters; its list has its own sorts
+          onPickLineup={(key) => {
+            setEnsemble(parseEnsembleKey(key));
+            setFilters((f) => ({ ...f, sort: undefined, order: undefined }));
+          }}
+        />
+      );
+    }
     if (count(ensemble) === 0 && !smaller) {
       return (
         <NoMatches
@@ -135,7 +152,7 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
         onSmallerChange={changeSmaller}
         smallerGroups={smallerGroups}
         q={q}
-        search={search}
+        slot={slot}
         filters={filters}
         onFiltersChange={setFilters}
         orchestra={orchestra}
@@ -149,16 +166,16 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
   };
 
   return (
-    <div className="layout" hidden={!active}>
+    <div className={picked ? "layout picked" : "layout"} hidden={!active}>
       <aside className="sidebar">
         <EnsembleBuilder count={count} ensemble={ensemble} onChange={changeEnsemble} includeArr={includeArr} onIncludeArrChange={setIncludeArr} />
       </aside>
-      {/* The same box as the filters' (in Results), with only the search in it */}
-      {!listing && (
-        <div className="main-search">
-          <div className="filter-box">{search}</div>
+      <div className="main-search">
+        <div className="filter-box">
+          <SearchField id="search" value={query} onChange={setQuery} narrowed={picked} />
+          <div className="filter-slot" ref={setSlot} />
         </div>
-      )}
+      </div>
       <div className="main">{main()}</div>
     </div>
   );
