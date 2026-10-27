@@ -3,6 +3,7 @@
 import { parseCategory } from "../../src/lib/instrumentation.ts";
 import { ERAS, type Era } from "../../src/shared/data.ts";
 import { cached, DAY, fetchJson, jitteredMaxAge, progress, readStage, writeStage } from "../http.ts";
+import type { StageReport } from "../stages.ts";
 
 const API = "https://imslp.org/api.php";
 
@@ -92,7 +93,7 @@ export async function fetchCategoryWorks(category: string): Promise<ImslpWork[]>
   return [...works.values()];
 }
 
-export async function crawlImslp(opts: { minWorks: number }): Promise<void> {
+export async function crawlImslp(opts: { minWorks: number }): Promise<StageReport> {
   console.log("IMSLP: instrumentation categories");
   const all = await cached("imslp:allcategories:v1", DAY, fetchAllCategories);
   const categories = all.value
@@ -124,10 +125,12 @@ export async function crawlImslp(opts: { minWorks: number }): Promise<void> {
       }
     }
     tick(i + 1, `${fetched} fetched, ${failed} failed`);
-    if (i % 100 === 99) await writeStage("imslp", stage); // checkpoint: a partial crawl can already be indexed
   }
+  // Written once complete, never as a checkpoint: a stage file is always a whole
+  // catalogue (an interrupted run resumes from the HTTP cache instead)
   await writeStage("imslp", stage);
   console.log(`  ${Object.keys(stage.works).length} works in ${categories.length} categories (${fetched} fetched, ${failed} failed)`);
+  return { failed, of: categories.length };
 }
 
 /** Era ("People from the X era") for each composer name, refreshed every 150–210 days (staggered). */

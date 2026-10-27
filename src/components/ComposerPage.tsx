@@ -4,6 +4,7 @@ import { readFilters } from "../lib/filters";
 import { useWorks } from "../lib/useWorks";
 import { PROVIDERS } from "../shared/data";
 import { setSortParams, SortSelect, type Sorting } from "./SortSelect";
+import { GoneNotice } from "./GoneNotice";
 import { LoadError } from "./LoadError";
 import { LoadingStatus } from "./LoadingStatus";
 import { WorkList } from "./WorkList";
@@ -48,6 +49,7 @@ export function ComposerPage({ id }: { id: string }) {
   const { works, total, loading, more, error: worksError, hasMore, loadMore, retry } = useWorks(c ? query : null);
   const busy = loading && !more;
 
+  if (error && "gone" in error && error.gone) return <GoneNotice gone={error.gone} what="composer" />;
   if (error) return <div className="notice error">{"status" in error && error.status === 404 ? "No such composer." : `Couldn't load this composer. ${error.message}`}</div>;
   if (!c || c.id !== id) {
     return (

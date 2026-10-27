@@ -4,6 +4,7 @@ import { Link } from "../lib/router";
 import { describeOrchestration } from "../lib/orchestration";
 import { formatDuration } from "../shared/paths";
 import { CORE_SCORE, lineupSourceUrl, PROVIDERS, SOURCES, type Link as WorkLink } from "../shared/data";
+import { GoneNotice } from "./GoneNotice";
 import { arrangedText, WorkList } from "./WorkList";
 
 const fmt = new Intl.NumberFormat("en");
@@ -45,6 +46,7 @@ export function WorkPage({ id }: { id: string }) {
     if (w) document.title = `${w.title}${w.composer ? ` – ${w.composer.name}` : ""} · Repertoire Finder`;
   }, [w]);
 
+  if (error && "gone" in error && error.gone) return <GoneNotice gone={error.gone} what="work" />;
   if (error) return <div className="notice error">{"status" in error && error.status === 404 ? "No such work." : `Couldn't load this work. ${error.message}`}</div>;
   if (!w || (loading && w.id !== id)) {
     return (
@@ -171,15 +173,23 @@ export function WorkPage({ id }: { id: string }) {
         {w.orchestration && (
           <div className="orchestration">
             <p>
-              <span className="orchestration-tag">{w.orchestration.scoring}</span>{" "}
+              <span className={`orchestration-tag${w.orchestration.status !== "confirmed" ? " single" : ""}`}>{w.orchestration.scoring}</span>{" "}
               <span className="muted small">
-                according to{" "}
+                from{" "}
                 <a href={w.orchestration.url} target="_blank" rel="noreferrer">
-                  {w.orchestration.source === "rism" ? "a copy in RISM" : "IMSLP's parts and description"}
+                  {w.orchestration.basis}
                 </a>
+                {w.orchestration.status === "confirmed" ? ", which agree" : w.orchestration.status === "single" ? ", no other source to confirm it" : ""}
               </span>
             </p>
             <p className="small">{describeOrchestration(w.orchestration.instruments)}</p>
+            {w.orchestration.status === "partial" && (
+              <p className="small muted">
+                Not the whole scoring, as far as we can tell
+                {w.orchestration.unresolved.length > 0 ? `: the parts also include ${w.orchestration.unresolved.slice(0, 4).join(", ")}, which we can't read` : ""}. It
+                isn't used to say which orchestras can play it.
+              </p>
+            )}
           </div>
         )}
       </section>

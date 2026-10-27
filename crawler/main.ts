@@ -9,7 +9,8 @@
 import { parseArgs } from "node:util";
 import { buildDataset, DATASET_PATH } from "./build.ts";
 import { writeExports } from "./export.ts";
-import { collectGarbage, readStage } from "./http.ts";
+import { collectGarbage, readStage, takeStaleUses } from "./http.ts";
+import { recordStage, type StageReport } from "./stages.ts";
 import { crawlComposerEras, crawlImslp, type ImslpStage } from "./sources/imslp.ts";
 import { crawlImslpPages } from "./sources/imslp-pages.ts";
 import { crawlMusicBrainz } from "./sources/musicbrainz.ts";
@@ -67,17 +68,21 @@ const gcNamespaces: Partial<Record<Stage, string>> = {
 const completed: string[] = [];
 
 const started = Date.now();
+const failures: string[] = [];
 for (const stage of STAGES) {
   if (!stages.includes(stage)) continue;
   const t = Date.now();
+  const at = new Date();
+  takeStaleUses();
   try {
-    if (stage === "imslp") await crawlImslp({ minWorks: Number(values["min-works"]) });
-    if (stage === "imslp-pages") await crawlImslpPages();
+    let report: StageReport | void = undefined;
+    if (stage === "imslp") report = await crawlImslp({ minWorks: Number(values["min-works"]) });
+    if (stage === "imslp-pages") report = await crawlImslpPages();
     if (stage === "wikipedia") await crawlWikipedia();
     if (stage === "wikidata") await crawlWikidata();
     if (stage === "openopus") await crawlOpenOpus();
     if (stage === "composers") await crawlComposerEras(await composerNames());
-    if (stage === "musicbrainz") await crawlMusicBrainz({ budget: Number(values["mb-budget"]) });
+    if (stage === "musicbrainz") report = await crawlMusicBrainz({ budget: Number(values["mb-budget"]) });
     if (stage === "mutopia") await crawlMutopia();
     if (stage === "libris") await crawlLibris();
     if (stage === "gnd") await crawlGnd();
@@ -86,17 +91,31 @@ for (const stage of STAGES) {
       const { meta } = await buildDataset();
       await writeExports(DATASET_PATH, meta);
     }
+    if (stage !== "build") {
+      // A partial IMSLP run (--min-works) isn't a whole catalogue
+      if (stage === "imslp" && Number(values["min-works"]) > 1) report = { ...report, partial: true };
+      const status = await recordStage(stage, { report, stale: takeStaleUses() }, at);
+      const notes = [status.failed && `${status.failed}${status.of ? ` of ${status.of}` : ""} failed, earlier results kept`, status.stale && `${status.stale} stale cache entries used`].filter(Boolean);
+      if (notes.length) console.log(`  ⚠ ${notes.join("; ")}`);
+    }
     const ns = gcNamespaces[stage];
     if (ns) completed.push(ns);
+    console.log(`✓ ${stage} (${Math.round((Date.now() - t) / 1000)}s)\n`);
   } catch (e) {
-    // A failed source stage keeps its previous output; the build uses whatever is there.
+    // A failed source stage keeps its last completed output, which the build uses; the
+    // manifest says it's out of date, and the run fails, so nothing publishes it as fresh.
     console.error(`✗ stage ${stage} failed: ${(e as Error).stack ?? e}`);
-    if (stage === "build") process.exitCode = 1;
+    if (stage !== "build") await recordStage(stage, { error: e, stale: takeStaleUses() }, at);
+    failures.push(stage);
+    console.log(`✗ ${stage} (${Math.round((Date.now() - t) / 1000)}s)\n`);
   }
-  console.log(`✓ ${stage} (${Math.round((Date.now() - t) / 1000)}s)\n`);
 }
 if (completed.length) {
   const gc = await collectGarbage(completed);
   if (gc.files) console.log(`Cache cleanup (${completed.join(", ")}): removed ${gc.files} unused entries, ${(gc.bytes / 1024 / 1024).toFixed(1)} MiB`);
 }
 console.log(`Done in ${Math.round((Date.now() - started) / 1000)}s`);
+if (failures.length) {
+  console.error(`Failed: ${failures.join(", ")}. Their last completed results were used; see .cache/stages/manifest.json`);
+  process.exitCode = 1;
+}

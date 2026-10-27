@@ -4,6 +4,7 @@
 // know, in the preposition's language, or there's no line-up.
 
 import { ensembleKey, type Ensemble } from "../src/lib/instrumentation.ts";
+import { normalize } from "../src/shared/text.ts";
 
 type Words = Record<string, string | Ensemble>;
 
@@ -290,7 +291,52 @@ export function withoutLineup(title: string): string | null {
 
 // Genre words that alone don't name one work ("Sonat", "Trio nr 1" names one only with its number)
 const GENERIC =
-  /^(?:sonat[ae]?|sonatin[ae]?|trio|duo|duett?o?|kvartett|quartett?e?|quatuor|quartetto|kvintett|quintett?e?|svit|suite|konsert|concerto|konzert|fantasi[ae]?|fantasy|romans|romance|romanze|variationer|variationen|variations|preludium|prelude|präludium|etyd|etude|étude|marsch|march|marche|vals|waltz|walzer|valse|menuett|minuet|scherzo|rondo|serenad[ae]?|divertimento|partita|nocturne|impromptu|sånger|lieder|songs|psalm|stycken|stücke|pieces|morceaux|toccata|fuga|fuge|fugue|sinfonia|symphony|symfoni|sinfonie|capriccio|ballad[ae]?|elegi[ae]?|air|aria|adagio|andante|allegro|intermezzo|pastoral[e]?|polska|dans|danse|tanz|musik|music|musique)s?$/i;
+  /^(?:sonat[ae]?|sonatin[ae]?|trio|duo|duett?o?|kvartett|quartett?e?|quatuor|quartetto|kvintett|quintett?e?|svit|suite|konsert|concerto|konzert|fantasi[ae]?|fantasy|romans|romance|romanze|variationer|variationen|variations|preludium|prelude|präludium|etyd|etude|étude|etüde|etüden|studie|studien|studi|study|studies|konzerte|marsch|march|marche|vals|waltz|walzer|valse|menuett|minuet|scherzo|rondo|serenad[ae]?|divertimento|partita|nocturne|impromptu|sånger|lieder|songs|psalm|stycken|stücke|pieces|morceaux|toccata|fuga|fuge|fugue|sinfonia|symphony|symfoni|sinfonie|capriccio|ballad[ae]?|elegi[ae]?|air|aria|adagio|andante|allegro|intermezzo|pastoral[e]?|polska|dans|danse|tanz|musik|music|musique)s?$/i;
+
+// Genre words in the languages titles come in, folded to ASCII, by the genre they name
+const GENRES: [string, string[]][] = [
+  ["sonata", ["sonat", "sonata", "sonate", "sonaten", "sonatas", "sonates"]],
+  ["sonatina", ["sonatin", "sonatina", "sonatine", "sonatinen", "sonatinas"]],
+  ["duo", ["duo", "duos", "duet", "duets", "duett", "duette", "duetto", "duetti"]],
+  ["trio", ["trio", "trios"]],
+  ["quartet", ["quartet", "quartets", "kvartett", "quartett", "quartette", "quatuor", "quatuors", "quartetto", "quartetti"]],
+  ["quintet", ["quintet", "quintets", "kvintett", "quintett", "quintette", "quintetto"]],
+  ["sextet", ["sextet", "sextett", "sextette", "sestetto"]],
+  ["octet", ["octet", "oktett", "oktette", "ottetto"]],
+  ["suite", ["suite", "suites", "svit", "suiten"]],
+  ["concerto", ["concerto", "concertos", "concerti", "konsert", "konzert", "konzerte", "concierto"]],
+  ["concertino", ["concertino", "concertinos", "konzertstuck"]],
+  ["fantasia", ["fantasi", "fantasia", "fantasie", "fantasien", "fantasy", "fantaisie", "fantasias"]],
+  ["romance", ["romans", "romance", "romances", "romanze", "romanzen", "romanza"]],
+  ["variations", ["variationer", "variationen", "variations", "variazioni", "variaciones"]],
+  ["prelude", ["preludium", "prelude", "preludes", "praludium", "praludien", "preludio"]],
+  ["study", ["etyd", "etude", "etudes", "etuden", "etude", "studie", "studien", "studi", "study", "studies"]],
+  ["march", ["marsch", "march", "marches", "marche", "marcia"]],
+  ["waltz", ["vals", "waltz", "waltzes", "walzer", "valse", "valses"]],
+  ["minuet", ["menuett", "minuet", "minuets", "menuet", "minuetto"]],
+  ["serenade", ["serenad", "serenade", "serenades", "serenaden", "serenata"]],
+  ["divertimento", ["divertimento", "divertimenti"]],
+  ["nocturne", ["nocturne", "nocturnes", "notturno", "notturni"]],
+  ["songs", ["sanger", "lieder", "lied", "songs", "song", "chansons", "canzoni"]],
+  ["pieces", ["stycken", "stucke", "stuck", "pieces", "piece", "morceaux", "morceau"]],
+  ["fugue", ["fuga", "fuge", "fugen", "fugue", "fugues"]],
+  ["symphony", ["sinfonia", "sinfonie", "sinfonien", "symphony", "symphonies", "symfoni", "symphonie"]],
+  ["mass", ["mass", "messe", "messen", "missa"]],
+  ["dances", ["dans", "danse", "danses", "tanz", "tanze", "dances", "dance"]],
+  ["ballade", ["ballad", "ballade", "ballades", "ballata"]],
+  ["music", ["musik", "music", "musique"]],
+  ["fanfare", ["fanfare", "fanfares", "fanfaren"]],
+];
+const GENRE_OF = new Map(GENRES.flatMap(([genre, words]) => words.map((w) => [w, genre] as const)));
+
+/** The genre a title names, in any of its languages: "Konzerte" and "Horn Concerto No.1" → "concerto" */
+export function genreOf(title: string): string | null {
+  for (const word of normalize(title).split(" ")) {
+    const g = GENRE_OF.get(word);
+    if (g) return g;
+  }
+  return null;
+}
 
 /** Whether a title, numbers aside, is only a genre: "Sonat", "Trio, op. 6" */
 export const onlyGenre = (title: string) =>

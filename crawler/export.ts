@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { gzipSync } from "node:zlib";
 import { DATA_LICENSE, EXPORT_FILES, SOURCES, type Meta } from "../src/shared/data.ts";
-import { DATA_TABLES, TABLES } from "./db.ts";
+import { BUILD_TABLES, DATA_TABLES, TABLES } from "./db.ts";
 import { CACHE_DIR } from "./http.ts";
 import { zip } from "./zip.ts";
 
@@ -27,10 +27,13 @@ with CC0 data from Wikidata, Open Opus and MusicBrainz:
 ${Object.values(SOURCES).map((s) => `  - ${s.name} (${s.url}), ${s.license}: ${s.role}`).join("\n")}
 
 Work and composer ids are persistent: https://repertoire.tgwizard.com/work/<id>.
-Ids merged into another are listed in redirects.
+Ids merged into another are listed in redirects; ids no longer listed in retired.
 
 Schema (the CSVs have the same columns; JSON columns are JSON text):
 ${TABLES.trim()}
+
+In the SQLite file only, for building the next version:
+${BUILD_TABLES.trim()}
 `;
 }
 

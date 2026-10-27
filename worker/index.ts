@@ -35,7 +35,7 @@ async function cached(request: Request, env: Env, ctx: ExecutionContext, produce
   if (hit) return forBrowser(hit);
 
   const res = await produce();
-  if (![200, 301, 404].includes(res.status)) return res;
+  if (![200, 301, 404, 410].includes(res.status)) return res;
   const headers = new Headers(res.headers);
   headers.set("Cache-Control", `public, max-age=${EDGE_TTL}`);
   ctx.waitUntil(cache.put(key.toString(), new Response(res.clone().body, { status: res.status, headers })));

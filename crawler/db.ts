@@ -2,7 +2,9 @@
 // published as the SQLite download and loaded into Cloudflare D1, which the Worker
 // queries. Comments here are the documentation of the downloads too.
 
-export const SCHEMA_VERSION = 7;
+import { column, ORCHESTRA_KEYS } from "../src/lib/orchestration.ts";
+
+export const SCHEMA_VERSION = 8;
 
 export const TABLES = `
 -- Dataset version, build time, counts, schema version and stats (JSON)
@@ -55,19 +57,18 @@ CREATE TABLE works (
   movements INTEGER                   -- (IMSLP)
 );
 
--- An orchestral work's scoring, in the shorthand orchestras use. The counts are players
--- per section, auxiliaries included (a piccolo needs a flautist), so that "can our
--- orchestra play it" is a comparison per column.
+-- An orchestral work's scoring, in the shorthand orchestras use, and what it's read from.
+-- A column per instrument, of its players (a piccolo "+picc" is a player of its own),
+-- and per doubling ("fl_picc": flautists who also play piccolo), so that whether an
+-- orchestra can play it is a comparison of columns (see src/lib/orchestration.ts).
 CREATE TABLE orchestrations (
   work_id TEXT PRIMARY KEY REFERENCES works (id),
-  scoring TEXT NOT NULL,              -- "2+picc.2.2.2+cbn – 4.2.3.1 – timp – perc – str"
-  instruments TEXT NOT NULL,          -- JSON: instrument → players ({"fl":2,"picc":1,…})
-  fl INTEGER NOT NULL, ob INTEGER NOT NULL, cl INTEGER NOT NULL, bn INTEGER NOT NULL,
-  hn INTEGER NOT NULL, tpt INTEGER NOT NULL, tbn INTEGER NOT NULL, tba INTEGER NOT NULL,
-  timp INTEGER NOT NULL, perc INTEGER NOT NULL, hp INTEGER NOT NULL,
-  kbd INTEGER NOT NULL,               -- piano, celesta, organ, harpsichord, continuo
-  other INTEGER NOT NULL,             -- saxophones, guitars, mandolins
-  str INTEGER NOT NULL,               -- 1 with a string section
+  scoring TEXT NOT NULL,              -- "2+picc.2.2.2+cbn – 4.2.3.1 – timp – perc – str", "3/picc…"
+  instruments TEXT NOT NULL,          -- JSON: instrument → players ({"fl":3,"fl/picc":1,…})
+  status TEXT NOT NULL,               -- confirmed (two readings agree), single (one, its parts named one by one), partial (not to be relied on)
+  basis TEXT NOT NULL,                -- what it's read from: "an edition's parts and the Instrumentation field"
+  unresolved TEXT NOT NULL,           -- JSON: parts it names we can't read ("Alto Horn 1")
+  ${ORCHESTRA_KEYS.map((k) => `${column(k)} INTEGER NOT NULL`).join(", ")},
   source TEXT NOT NULL,               -- imslp (its parts or Instrumentation field), rism
   ref TEXT NOT NULL                   -- the IMSLP page id or RISM source id it's read from
 ) WITHOUT ROWID;
@@ -138,9 +139,39 @@ CREATE TABLE redirects (
   PRIMARY KEY (entity, old_id)
 ) WITHOUT ROWID;
 
+-- Ids no longer in the dataset, and not merged into another, so their URLs can say what
+-- they were and why they're gone (HTTP 410) rather than nothing at all
+CREATE TABLE retired (
+  entity TEXT NOT NULL,               -- 'work' or 'composer'
+  id TEXT NOT NULL,
+  title TEXT NOT NULL,                -- the work's title or the composer's name, when last listed
+  composer TEXT,                      -- a work's composer, by name
+  since TEXT NOT NULL,                -- the first dataset version without it
+  reason TEXT NOT NULL,               -- 'uncertain': may be a work listed (see_also) under another title; 'gone': no longer in the sources, or no longer qualifies
+  see_also TEXT NOT NULL,             -- JSON array of work ids it may be
+  PRIMARY KEY (entity, id)
+) WITHOUT ROWID;
+
 -- Full-text search; rowid is works.n / composers.n
 CREATE VIRTUAL TABLE works_fts USING fts5 (title, composer, aliases, keys, arrangers, tokenize = 'unicode61 remove_diacritics 2');
 CREATE VIRTUAL TABLE composers_fts USING fts5 (name, tokenize = 'unicode61 remove_diacritics 2');
+`;
+
+/**
+ * In the built database (and the SQLite download), not in D1 or the CSVs: what the
+ * next build needs to keep ids where they are (see crawler/ids.ts).
+ */
+export const BUILD_TABLES = `
+-- The source records each work and composer was built from ("imslp:509772",
+-- "wikidata:Q1234", "openopus:antonin dvorak"), whether or not they have a page to link
+-- to, and those of ids no longer in the dataset, should their records come back
+CREATE TABLE anchors (
+  entity TEXT NOT NULL,               -- 'work' or 'composer'
+  anchor TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  position INTEGER NOT NULL,          -- among the entity's anchors, strongest first; -1 for a record it no longer has (kept, should it come back)
+  PRIMARY KEY (entity, anchor)
+) WITHOUT ROWID;
 `;
 
 export const INDEXES = `
@@ -154,4 +185,4 @@ CREATE UNIQUE INDEX links_ref ON links (entity, provider, ref);
 `;
 
 /** Tables in the downloads and in D1, in dependency order (FTS tables are rebuilt from these). */
-export const DATA_TABLES = ["meta", "sources", "composers", "works", "lineups", "scorings", "orchestrations", "arrangements", "lineup_facets", "links", "redirects"] as const;
+export const DATA_TABLES = ["meta", "sources", "composers", "works", "lineups", "scorings", "orchestrations", "arrangements", "lineup_facets", "links", "redirects", "retired"] as const;

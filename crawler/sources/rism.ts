@@ -6,11 +6,10 @@
 // RISM exports everything monthly as MARC XML. Composers are RISM people, whose records
 // carry GND and Wikidata ids: that's how they bridge to ours.
 
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { createGunzip } from "node:zlib";
-import { CACHE_DIR, DAY, USER_AGENT, writeStage } from "../http.ts";
+import { CACHE_DIR, DAY, gzipText, USER_AGENT, writeStage } from "../http.ts";
 
 const EXPORTS = "https://rism.digital/exports";
 const MAX_AGE = 45 * DAY;
@@ -76,8 +75,8 @@ async function download(name: string): Promise<{ path: string; at: number }> {
 /** MARC records from a gzipped MARC XML file, as they stream. */
 async function* marcRecords(path: string): AsyncGenerator<string> {
   let buffer = "";
-  for await (const chunk of createReadStream(path).pipe(createGunzip())) {
-    buffer += chunk.toString("utf8");
+  for await (const chunk of gzipText(path)) {
+    buffer += chunk;
     let end: number;
     while ((end = buffer.search(/<\/(?:marc:)?record>/)) >= 0) {
       const close = buffer.indexOf(">", end) + 1;

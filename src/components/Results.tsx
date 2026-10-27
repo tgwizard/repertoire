@@ -197,7 +197,11 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
                         <>
                           Winds and brass as players per section: <strong>flutes.oboes.clarinets.bassoons</strong>, then{" "}
                           <strong>horns.trumpets.trombones.tuba</strong>. Then the rest: timp, perc, hp, cel, pf, org, hpd, str (strings), with a
-                          number for more than one (2hp, 3perc). A piccolo, English horn and the like go after their section with +: 3+picc.
+                          number for more than one (2hp, 3perc). A piccolo, English horn and the like go after their section: with + when
+                          someone plays only that (2+picc: two flutes and a piccolo), with / when one of the section doubles on it (3/picc: three
+                          flutes, one also playing piccolo); the same for a pianist on celesta (pf/cel). Nothing else is assumed: a flautist
+                          plays piccolo only if you say so, and an organ isn't a piano. A work fits when its scoring, as its parts or other
+                          sources give it, needs no more than that.
                           <span className="orchestra-examples">
                             {EXAMPLES.map(([label, scoring]) => (
                               <button
@@ -249,7 +253,8 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
                       {unscored > 0 && (
                         <span className="muted">
                           {" "}
-                          Leaves out {fmt.format(unscored)} orchestral {unscored === 1 ? "work" : "works"} whose scoring we don't know.
+                          Leaves out {fmt.format(unscored)} orchestral {unscored === 1 ? "work" : "works"} whose scoring we don't know, or only in
+                          part.
                         </span>
                       )}
                     </>

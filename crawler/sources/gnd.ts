@@ -5,11 +5,10 @@
 // The work file is one dump (~85 MB, RDF/XML, updated a few times a year). Composers are
 // GND person ids: Wikidata's GND ids (P227) bridge them to ours.
 
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { createGunzip } from "node:zlib";
-import { cached, CACHE_DIR, DAY, progress, readStage, USER_AGENT, writeStage } from "../http.ts";
+import { cached, CACHE_DIR, DAY, gzipText, progress, readStage, USER_AGENT, writeStage } from "../http.ts";
 import type { WikidataStage } from "./wikidata.ts";
 
 const DUMP_URL = "https://data.dnb.de/opendata/authorities-gnd-werk_lds.rdf.gz";
@@ -101,8 +100,8 @@ export function parseWork(record: string): GndWork | null {
 async function* records(path: string): AsyncGenerator<string> {
   const BOUNDARY = '\n<rdf:Description rdf:about="https://d-nb.info/gnd/';
   let buffer = "";
-  for await (const chunk of createReadStream(path).pipe(createGunzip())) {
-    buffer += chunk.toString("utf8");
+  for await (const chunk of gzipText(path)) {
+    buffer += chunk;
     let i: number;
     while ((i = buffer.indexOf(BOUNDARY, 1)) >= 0) {
       yield buffer.slice(0, i);
@@ -277,6 +276,63 @@ export function gndTitle(name: string): string {
   if (rest[0] && /^Nr\.\s*\S+$/.test(rest[0])) title += ` ${rest.shift()!.replace(/^Nr\.\s*/, "No. ")}`;
   if (english) title += ` in ${english}`;
   return [title, ...rest].join(", ").replace(/\bNr\.\s*/g, "No. ");
+}
+
+/**
+ * The work a record is part of, by name, if it's a part: "Lakmé. Où va la jeune Indoue" →
+ * "Lakmé", "Lieder (1846). Lockung" → "Lieder (1846)". Abbreviations ("op.", "St.") and
+ * initials ("Joh. Seb. Bach") aren't the separator.
+ */
+export function gndParent(w: GndWork): string | null {
+  return gndPart(w)?.parent ?? null;
+}
+
+const ABBREVIATED = new RegExp(`\\b(?:op|Op|Nr|No|St|Hl|hl|Bd|Vol|vol|ca|Hob|KV|BWV|Mr|Mrs|Dr|Fr|Th|Ph|Joh|Sr|Jr|Br|N|n|Singst|${[...ABBREVIATIONS].join("|")})\\.|\\b\\p{Lu}\\p{Ll}{0,2}\\.(?=\\s*\\p{Lu})|\\.\\.\\.`, "gu");
+
+/**
+ * A record of part of a work: the work's name and the part's ("Lakmé" and "Où va la jeune
+ * Indoue"). A movement or section ("Manfred. Ouvertüre", "Sonate. Andante", "Teil 6") is
+ * only ever part of its work; a number in a set ("Sonata, Violoncello. No. 1"), a song or
+ * an aria with a title of its own is a piece people play on its own too (`standalone`).
+ */
+export function gndPart(w: GndWork): { parent: string; part: string; numbered: boolean; standalone: boolean } | null {
+  const masked = w.name.replace(ABBREVIATED, (m) => "#".repeat(m.length));
+  const i = masked.search(/\.\s+[\p{L}#]/u); // "#": a masked "Nr." starting the part
+  if (i <= 0) return null;
+  const part = w.name.slice(i + 1).trim();
+  const numbered = /^(?:[\p{L}-]+,?\s+)?(?:No|Nr|N)\.?\s*\d+[a-z]?(?:\s*\([^)]*\))?$/u.test(part); // "Nr. 2 (E-Dur)"
+  // GND's other names may say what kind of part it is: "Klaviertrio. 1. Satz"
+  const movement = MOVEMENT.test(part) || (w.variants ?? []).some((v) => /\b\d+\.\s*Satz\b|\bSatz\s+\d+\b|\bmovements?\b|\bmouvement\b/i.test(v));
+  return { parent: w.name.slice(0, i), part, numbered, standalone: numbered || !movement };
+}
+
+// Movements, sections and numbers of a stage work: parts that aren't pieces of their own
+const MOVEMENT =
+  /^(?:(?:satz|teil|akt|act|atto|szene|scene|sc[eè]ne|bild|fassung|version|nr|no|n)\b|\d|(?:vorspiel|ouvert[uü]re|overture|ouverture|sinfonia|prelude|prélude|präludium|preludio|finale|introduction|introduktion|introduzione|intermezzo|entr'?acte|zwischenspiel|nachspiel|postlude|coda|ballett?|tanz|danse|marsch|march|marche|allegro|allegretto|andante|andantino|adagio|adagietto|largo|larghetto|lento|presto|vivace|moderato|grave|menuett|minuet|menuet|minuetto|scherzo|trio|rondo|gavotte|sarabande|courante|allemande|gigue|bourr[ée]e|air|aria|variation|variationen|variations|thema|theme|fuge|fugue|fuga|kadenz|cadenza)\b)/iu;
+
+/** When it was written: GND's date, else the year its name gives ("Konzerte, Horn, Orchester (2003)") */
+export function gndYear(w: GndWork): number | null {
+  return w.year ?? (Number(/\((\d{4})\)$/.exec(w.name)?.[1]) || null);
+}
+
+/**
+ * Its other names worth searching by: original titles ("Tre studi per flauto, clarinetto e
+ * fagotto"), not GND's own catalogue forms ("Studien, Fl, Klar, Fg (1958)", "Sonaten op. 11, 3").
+ */
+export function gndAliases(w: GndWork): string[] {
+  return w.variants
+    .filter((v) => {
+      const segments = v.replace(/\s*\(\d{4}\)$/, "").split(/,\s*|\s+(?=op\.)/i);
+      return (
+        !(segments[0]!.split(" ")[0]! in GENRES) &&
+        !segments.some(isMedium) &&
+        !segments.some((s) => /^(op\.|Nr\.)/i.test(s)) &&
+        // "Romanzen, Vc Orch AV 75", "Occasional oratorio <Marsch>", "Satz 4"
+        !v.split(/[\s,.]+/).some((t) => ABBREVIATIONS.has(t)) &&
+        !/[<>]|\bSatz\b/.test(v)
+      );
+    })
+    .slice(0, 3);
 }
 
 /** A title for matching against other sources: name, numbers and key, in their forms. */

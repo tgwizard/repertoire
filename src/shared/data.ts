@@ -172,8 +172,10 @@ export interface WorkSummary {
   /** Seconds, roughly */
   duration: number | null;
   movements: number | null;
-  /** An orchestral work's scoring: "2.2.2.2 – 4.2.3.1 – timp – str" */
+  /** An orchestral work's scoring: "2.2.2.2 – 4.2.3.1 – timp – str" (not one that's partial) */
   orchestration: string | null;
+  /** How far it's to be trusted: two readings agree, or one */
+  orchestrationStatus?: "confirmed" | "single";
   /**
    * Who arranged it (on IMSLP): on a line-up's list, the row's arrangements for it; in a
    * search, those by an arranger searched for, with the line-up described
@@ -204,8 +206,18 @@ export interface ArrangementDetail {
 /** Where an orchestral work's scoring was read */
 export interface OrchestrationDetail {
   scoring: string;
-  /** Instrument → players: { fl: 2, picc: 1, … } */
+  /** Instrument → players: { fl: 2, picc: 1, "fl/picc": 1, … } */
   instruments: Record<string, number>;
+  /**
+   * confirmed: two readings agree; single: one reading, its parts named one by one;
+   * partial: parts we can't read, or no reading of the whole orchestra (not used to say
+   * what an orchestra can play)
+   */
+  status: "confirmed" | "single" | "partial";
+  /** What it's read from: "an edition's parts and the Instrumentation field" */
+  basis: string;
+  /** Parts it names that we can't read: "Alto Horn 1" */
+  unresolved: string[];
   source: SourceId;
   ref: string;
   url: string;
@@ -218,6 +230,18 @@ export interface Scoring {
   arrangement: boolean;
   /** Which sources say the work is for this line-up, and where */
   sources: { source: SourceId; ref: string }[];
+}
+
+/** A work or composer no longer listed (HTTP 410): what it was, and why it's gone */
+export interface Gone {
+  id: string;
+  title: string;
+  composer: string | null;
+  /** The first dataset without it */
+  since: string;
+  /** "uncertain": it may be one of seeAlso, listed under another title; "gone": no longer in the sources, or no longer qualifies */
+  reason: "uncertain" | "gone";
+  seeAlso: { id: string; title: string; composer: { name: string } | null }[];
 }
 
 export interface WorkDetail {
@@ -321,6 +345,8 @@ export interface DatasetStats {
   arrangementOnly: number;
   /** Orchestral works with a known scoring, by where it was read */
   orchestrations?: Partial<Record<SourceId, number>>;
+  /** Scorings by how far they can be trusted: confirmed, single, partial */
+  orchestrationStatus?: Record<string, number>;
   /** Works with a duration, and with a number of movements */
   durations?: number;
   movements?: number;
@@ -346,7 +372,8 @@ export interface Meta {
   stats: DatasetStats | null;
 }
 
-export type WorkSort = "relevance" | "rank" | "players" | "chronological" | "composer" | "title" | "duration";
+export const WORK_SORTS = ["relevance", "rank", "players", "chronological", "composer", "title", "duration"] as const;
+export type WorkSort = (typeof WORK_SORTS)[number];
 export type SortOrder = "asc" | "desc";
 
 // ---- Published datasets ----------------------------------------------------

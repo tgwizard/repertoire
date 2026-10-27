@@ -6,7 +6,9 @@
 // gave any of its anchors. New entities get a hash of their strongest anchor, so a
 // rebuild from scratch mostly reproduces the same ids. When two entities merge, the
 // losing id redirects to the winner; when one splits, the part holding the stronger
-// anchor keeps the id.
+// anchor keeps the id, and between equally strong ones the part most like what the id
+// showed before (its title, its year). Every anchor is kept in the dataset (the anchors
+// table), also those of ids no longer in it, so that their records can claim them back.
 
 import { createHash } from "node:crypto";
 
@@ -42,9 +44,17 @@ export interface Assigned {
 /**
  * Ids for entities given as their anchors ("scheme:ref"), strongest first. `schemes`
  * ranks anchor schemes, strongest first, to settle which entity keeps an id after a
- * split. Deterministic for the same input.
+ * split; between equally strong claims, `likeness(entity, id)` (higher is more alike)
+ * settles it. `redirectOnly` anchors (a record of part of the entity) redirect the ids
+ * they had, but never give one. Deterministic for the same input.
  */
-export function assignIds(entities: string[][], prev: PreviousIds, schemes: string[] = []): Assigned {
+export function assignIds(
+  entities: string[][],
+  prev: PreviousIds,
+  schemes: string[] = [],
+  likeness: (entity: number, id: string) => number = () => 0,
+  redirectOnly: string[][] = [],
+): Assigned {
   const strength = (anchor: string) => {
     const i = schemes.indexOf(anchor.slice(0, anchor.indexOf(":")));
     return i < 0 ? schemes.length : i;
@@ -55,7 +65,7 @@ export function assignIds(entities: string[][], prev: PreviousIds, schemes: stri
   };
 
   // Every previous id an entity can claim, ranked by the strength of the anchor.
-  const claims: { entity: number; id: string; rank: number }[] = [];
+  const claims: { entity: number; id: string; rank: number; like: number }[] = [];
   entities.forEach((anchors, entity) => {
     const seen = new Set<string>();
     anchors.forEach((anchor) => {
@@ -64,10 +74,10 @@ export function assignIds(entities: string[][], prev: PreviousIds, schemes: stri
       const id = follow(old);
       if (seen.has(id)) return;
       seen.add(id);
-      claims.push({ entity, id, rank: strength(anchor) });
+      claims.push({ entity, id, rank: strength(anchor), like: likeness(entity, id) });
     });
   });
-  claims.sort((a, b) => a.rank - b.rank || a.entity - b.entity);
+  claims.sort((a, b) => a.rank - b.rank || b.like - a.like || a.entity - b.entity);
 
   const ids: (string | undefined)[] = new Array(entities.length);
   const taken = new Set<string>();
@@ -92,6 +102,13 @@ export function assignIds(entities: string[][], prev: PreviousIds, schemes: stri
   for (const c of claims) {
     if (ids[c.entity] !== c.id && !taken.has(c.id)) redirects.set(c.id, ids[c.entity]!);
   }
+  redirectOnly.forEach((anchors, entity) => {
+    for (const a of anchors) {
+      const old = prev.anchors.get(a);
+      const id = old && follow(old);
+      if (id && !taken.has(id) && !redirects.has(id)) redirects.set(id, ids[entity]!);
+    }
+  });
   // Keep earlier redirects working, pointing straight at the current id.
   for (const old of prev.redirects.keys()) {
     const target = follow(old);

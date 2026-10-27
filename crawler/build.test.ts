@@ -111,11 +111,17 @@ test("RISM: copies of works we have, the composer's own hand first; libraries co
 });
 
 test("orchestral scoring: from IMSLP's parts, else RISM's copies; only for whole orchestras", () => {
-  const scoring = (title: string) => all("SELECT scoring, fl, bn, tbn, perc, str, source, ref FROM orchestrations WHERE work_id = ?", work(title).id)[0];
+  const scoring = (title: string) => all("SELECT scoring, status, basis, fl, picc, bn, cbn, tbn, perc, str, source, ref FROM orchestrations WHERE work_id = ?", work(title).id)[0];
   // Alto, tenor and bass trombones are three; a harp part uploaded on its own adds a harp, a stand-in nothing
-  assert.deepEqual(scoring("Symphony No.1, Op.68"), { scoring: "2.2.2.2+cbn – 4.2.3.0 – timp – hp – str", fl: 2, bn: 3, tbn: 3, perc: 0, str: 1, source: "imslp", ref: "20" });
-  assert.deepEqual(scoring("Symphony No.4, Op.98"), { scoring: "2+picc.2.2.2+cbn – 4.2.3.0 – timp – perc – str", fl: 3, bn: 3, tbn: 3, perc: 1, str: 1, source: "rism", ref: "9004" });
-  assert.equal(scoring("Symphony in G major, Op.5"), undefined); // only the string parts uploaded
+  assert.deepEqual(scoring("Symphony No.1, Op.68"), {
+    scoring: "2.2.2.2+cbn – 4.2.3.0 – timp – hp – str", status: "single", basis: "an edition's parts", fl: 2, picc: 0, bn: 2, cbn: 1, tbn: 3, perc: 0, str: 1, source: "imslp", ref: "20",
+  });
+  assert.deepEqual(scoring("Symphony No.4, Op.98"), {
+    scoring: "2+picc.2.2.2+cbn – 4.2.3.0 – timp – perc – str", status: "single", basis: "a library's copy", fl: 2, picc: 1, bn: 2, cbn: 1, tbn: 3, perc: 1, str: 1, source: "rism", ref: "9004",
+  });
+  // Only the string parts uploaded: kept as what they say, but not relied on
+  const strings = scoring("Symphony in G major, Op.5")!;
+  assert.deepEqual([strings.status, strings.scoring], ["partial", "0.0.0.0 – 0.0.0.0 – str"]);
   assert.equal(scoring("String Quartet No.62, Op.76 No.3"), undefined); // not for orchestra
   assert.deepEqual(
     [work("String Quartet No.62, Op.76 No.3"), work("Symphony No.1, Op.68"), work("Clarinet Quintet, Op.115")].map((w) => [w.duration, w.movements]),

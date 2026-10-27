@@ -2,7 +2,7 @@
 
 import { decodeEnsemble, ensembleKey } from "../src/lib/instrumentation.ts";
 import { parseOrchestration, type Orchestration } from "../src/lib/orchestration.ts";
-import { ERAS, type Era, type LineupsIndex, type WorkSort } from "../src/shared/data.ts";
+import { ERAS, WORK_SORTS, type Era, type LineupsIndex } from "../src/shared/data.ts";
 import { getComposer, getLineup, getLineups, getMeta, getWork, listWorks, search, type Db, type Found } from "./queries.ts";
 
 const ID = /^[0-9a-z]{8}$/;
@@ -40,9 +40,21 @@ const int = (value: string | null, fallback: number) => {
   return Math.trunc(n);
 };
 
+/** One of a parameter's values, or the default when it's absent; anything else is a 400. */
+function oneOf<T extends string>(p: URLSearchParams, name: string, values: readonly T[]): T | undefined;
+function oneOf<T extends string>(p: URLSearchParams, name: string, values: readonly T[], fallback: T): T;
+function oneOf<T extends string>(p: URLSearchParams, name: string, values: readonly T[], fallback?: T): T | undefined {
+  const v = p.get(name);
+  if (v === null || v === "") return fallback;
+  // includes(), not `in`: "constructor" and "toString" are no sort
+  if (!(values as readonly string[]).includes(v)) throw new HttpError(400, `${name} must be one of ${values.join(", ")}`);
+  return v as T;
+}
+
 function found<T>(r: Found<T>, url: URL, path: (id: string) => string): Response {
   if (!r) throw new HttpError(404, "Not found");
   if ("redirect" in r) return new Response(null, { status: 301, headers: { Location: path(r.redirect) + url.search, "Access-Control-Allow-Origin": "*" } });
+  if ("gone" in r) return json({ error: "No longer listed", gone: r.gone }, 410);
   return json(r.found);
 }
 
@@ -118,15 +130,15 @@ export async function handleApi(request: Request, db: Db): Promise<Response> {
           composer,
           arrangedBy: !!composer && p.get("arranged_by") === "1",
           eras: p.getAll("era").filter((e): e is Era | "Unknown" => e === "Unknown" || (ERAS as readonly string[]).includes(e)),
-          show: (["core", "free"] as const).find((s) => s === p.get("show")) ?? "all",
+          show: oneOf(p, "show", ["all", "core", "free"] as const, "all"),
           q,
           orchestra: orchestraParam(p.get("orchestra")),
-          fit: p.get("fit") === "exact" ? "exact" : "within",
+          fit: oneOf(p, "fit", ["within", "exact"] as const, "within"),
           minDuration: int(p.get("min_duration"), 0) || undefined,
           maxDuration: int(p.get("max_duration"), 0) || undefined,
           unknownDuration: p.get("duration") === "unknown",
-          sort: (p.get("sort") as WorkSort | null) ?? "rank",
-          order: (["asc", "desc"] as const).find((o) => o === p.get("order")),
+          sort: oneOf(p, "sort", WORK_SORTS, "rank"),
+          order: oneOf(p, "order", ["asc", "desc"] as const),
           offset: int(p.get("offset"), 0),
           limit: int(p.get("limit"), 50),
           facets: p.get("facets") === "1",

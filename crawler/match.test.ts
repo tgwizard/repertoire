@@ -80,6 +80,29 @@ test("different catalogue systems match on a numbered bare title only", () => {
   assert.equal(matchWork("Piano Trio, L.3", [{ title: "Piano Trio in G major, CD 5" }]), null);
 });
 
+test("different numbers in one catalogue are different works, whatever else they share", () => {
+  // A shared opus number doesn't outweigh contradictory Köchel numbers
+  assert.equal(matchWork("Sonata, K.1, Op.10", [{ title: "Sonata, K.2, Op.10" }]), null);
+  assert.equal(matchWork("Sonata, K.2, Op.10", [{ title: "Sonata, K.1, Op.10" }, { title: "Sonata, K.2, Op.10" }])?.title, "Sonata, K.2, Op.10");
+  // Nor do equal titles
+  assert.equal(matchWork("Divertimento, Hob.II:1", [{ title: "Divertimento, Hob.II:2" }]), null);
+  // A number the other title doesn't use a system for is no conflict
+  assert.equal(matchWork("Symphony in C minor, G.519, op. 41", [{ title: "Symphony in C minor, G.519" }])?.title, "Symphony in C minor, G.519");
+});
+
+test("a match by title alone can be refused; one by number is said to be", () => {
+  const concertos = [{ title: "Concerto", lineup: "horn,orchestra" }];
+  const seen: boolean[] = [];
+  assert.equal(matchWork("Concerto", concertos, (c, byNumber) => (seen.push(byNumber), c.lineup === "orchestra,tuba")), null);
+  assert.deepEqual(seen, [false]);
+  assert.equal(matchWork("Concerto, Op.5", [{ title: "Concerto, Op.5" }], (_, byNumber) => byNumber)?.title, "Concerto, Op.5");
+});
+
+test("catalogue numbers are compared as numbers: K 32 is K032", () => {
+  assert.deepEqual([...catalogueKeys("Piano-Rag-Music, K032")], [...catalogueKeys("Piano-Rag-music, K 32")]);
+  assert.deepEqual([...catalogueKeys("Cantata, TWV 1:048")], ["twv:1:48"]);
+});
+
 test("bare title fallback", () => {
   assert.equal(bareTitle("Kleine Kammermusik"), "kleine kammermusik");
   assert.equal(matchWork("Summer Music", [{ title: "Summer Music" }, { title: "Winter Music" }])?.title, "Summer Music");

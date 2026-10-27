@@ -165,6 +165,7 @@ const P: [Family, string, string?][] = [
   ["keyboards", "piano"],
   ["keyboards", "piano 4 hands", "piano four hands"],
   ["keyboards", "harpsichord"],
+  ["keyboards", "clavichord"],
   ["keyboards", "organ"],
   ["keyboards", "harmonium"],
   ["keyboards", "accordion"],

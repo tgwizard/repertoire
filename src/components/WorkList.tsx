@@ -68,7 +68,12 @@ export function WorkList({ works, lineup, showLineup, onComposer, groupByPlayers
             <div className="work-sources">
               {other && <span className="lineup-tag">for {describe(parseEnsembleKey(w.lineup))}</span>}
               {w.orchestration && (
-                <span className="orchestration-tag" title="Scoring: flutes.oboes.clarinets.bassoons – horns.trumpets.trombones.tuba">
+                <span
+                  className={`orchestration-tag${w.orchestrationStatus === "single" ? " single" : ""}`}
+                  title={`Scoring: flutes.oboes.clarinets.bassoons – horns.trumpets.trombones.tuba. ${
+                    w.orchestrationStatus === "confirmed" ? "Two sources agree on it." : "From one source: no other confirms it."
+                  }`}
+                >
                   {w.orchestration}
                 </span>
               )}

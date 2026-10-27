@@ -27,26 +27,26 @@ import {
   type Signal,
   type SourceId,
 } from "../src/shared/data.ts";
-import { INDEXES, SCHEMA_VERSION, TABLES } from "./db.ts";
+import { BUILD_TABLES, INDEXES, SCHEMA_VERSION, TABLES } from "./db.ts";
 import { sqliteDb } from "./d1.ts";
 import { listWorks, PRECOMPUTED_FACETS_MIN } from "../worker/queries.ts";
 import { openOpusEnsemble, titleFitsPlayers, WIKIDATA_ENSEMBLES, WIKIPEDIA_CATEGORIES, wikidataInstrumentsFit } from "./ensembles.ts";
 import { CACHE_DIR, readStage } from "./http.ts";
 import { assignIds, NO_PREVIOUS, type PreviousIds } from "./ids.ts";
-import { normalize } from "../src/shared/text.ts";
-import { bareTitle, catalogueKeys, ComposerIndex, displayName, matchWork, musicalKey } from "./match.ts";
+import { normalize, searchText } from "../src/shared/text.ts";
+import { bareTitle, catalogueKeys, ComposerIndex, displayName, matchWork, memo, musicalKey } from "./match.ts";
 import type { ComposerErasStage, ImslpStage } from "./sources/imslp.ts";
 import type { MusicBrainzStage } from "./sources/musicbrainz.ts";
 import { mutopiaUrl, type MutopiaStage } from "./sources/mutopia.ts";
 import { librisHolding, librisLineup, librisRecordLineup, librisUrl, type LibrisStage } from "./sources/libris.ts";
-import { ANTHOLOGY, onlyGenre, withoutLineup } from "./title-lineup.ts";
-import { gndLineup, gndMatchTitle, gndTitle, gndUrl, type GndStage } from "./sources/gnd.ts";
+import { ANTHOLOGY, genreOf, onlyGenre, withoutLineup } from "./title-lineup.ts";
+import { gndAliases, gndLineup, gndMatchTitle, gndPart, gndTitle, gndUrl, gndYear, type GndStage, type GndWork } from "./sources/gnd.ts";
 import { rismMatchTitle, rismPersonUrl, rismRank, rismUrl, type RismStage } from "./sources/rism.ts";
 import type { OpenOpusStage } from "./sources/openopus.ts";
 import { parseDuration, parseMovements, type ImslpPagesStage } from "./sources/imslp-pages.ts";
 import { readArrangements, THE_COMPOSER, type Arrangement } from "./arrangements.ts";
-import { isFullOrchestra, mergeOrchestrations, orchestrationFromParts, orchestrationFromRism, orchestrationFromText } from "./orchestration.ts";
-import { formatOrchestration, orchestraColumns, type Orchestration } from "../src/lib/orchestration.ts";
+import { chooseScoring, isFullOrchestra, orchestrationFromParts, orchestrationFromRism, orchestrationFromText, type Reading } from "./orchestration.ts";
+import { formatOrchestration, ORCHESTRA_KEYS, type Orchestration } from "../src/lib/orchestration.ts";
 import type { WdWork, WikidataStage } from "./sources/wikidata.ts";
 import type { WikipediaStage } from "./sources/wikipedia.ts";
 
@@ -124,7 +124,8 @@ interface BuildWork {
   /** Libraries holding a copy (RISM sigla; LIBRIS counts as Musik- och teaterbiblioteket) */
   libraries: Set<string>;
   /** An orchestra's scoring, and where it was read */
-  orchestration?: { o: Orchestration; source: "imslp" | "rism"; ref: string };
+  /** Readings of an orchestra's scoring: editions' parts, the Instrumentation field, libraries' copies */
+  readings: Reading[];
   /** Seconds */
   duration?: number;
   movements?: number;
@@ -210,8 +211,120 @@ function sameWorkByTitle(a: string, b: string, bNumbers: Set<string>): boolean {
   return true;
 }
 
+/** A record of a composer's works, or some of them, rather than of one */
+const COLLECTION = /^(werke|ausgewählte werke|sämtliche werke|gesammelte werke|kompositionen|works|selected works|complete works|collected works)\b/i;
+
+/** Line-up ids that don't say which instruments: "voices with keyboard", "keyboard", "instrument" */
+const vague = memo((lineup: string) =>
+  Object.keys(parseEnsembleKey(lineup)).some((id) => / with(out)? |^unaccompanied|^unspecified|instrument|ensemble$|^(voices|keyboard|chorus|choir)$/.test(id)),
+);
+
+/** Words in a title that say which work it is, not what kind ("Olympic", "fanfare"; not "concerto", "and"), singular */
+const telling = memo((title: string) => {
+  const words = normalize(title.replace(/\([^)]*\)/g, " ")).split(" ");
+  return new Set(words.filter((t) => t.length >= 4 && !/^\d/.test(t) && !onlyGenre(t) && !genreOf(t) && !STOPWORDS.has(t)).map((t) => t.replace(/(?<=\w{4})(?:es|s)$/, "")));
+});
+const genre = memo(genreOf);
+const STOPWORDS = new Set(
+  (
+    "with from uber pour avec dans sous zwei drei vier funf three four five major minor flat sharp nach after upon theme thema werk " +
+    // Instruments say what for, not which work
+    "flute oboe clarinet bassoon horn trumpet trombone tuba violin viola cello piano organ harp guitar harpsichord orchestra strings voice chorus choir " +
+    "klavier violine orgel orchester stimme chor flote klarinette fagott trompete posaune"
+  ).split(" "),
+);
+/** Whether two titles share a telling word, allowing a spelling variant ("Bojarenes inntogsmarsj", "Bojarernes intogsmarsch") */
+const sharesWord = (a: string, b: string) => {
+  const wb = [...telling(b)];
+  const close = (t: string, u: string) => t.length >= 6 && u.length >= 6 && t[0] === u[0] && Math.abs(t.length - u.length) <= 2 && editDistance(t, u) <= 2;
+  return [...telling(a)].some((t) => wb.some((u) => u === t || close(t, u)));
+};
+function editDistance(a: string, b: string): number {
+  if (Math.abs(a.length - b.length) > 2) return 3;
+  let row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j]! + 1, next[j - 1]! + 1, row[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    row = next;
+  }
+  return row[b.length]!;
+}
+/**
+ * Of one genre, in any language, one of them saying nothing more: "Concerto in C major"
+ * and "Oboe Concerto in C major"; not "Olympic Fanfare" and "Liberty Fanfare"
+ */
+const sameGenre = (a: string, b: string) => {
+  const g = genre(a);
+  return !!g && genre(b) === g && (!telling(a).size || !telling(b).size);
+};
+// Instruments a title names, in the languages titles come in (folded to ASCII)
+const NAMED_INSTRUMENTS: [string, RegExp][] = [
+  ["violin", /\b(violin|violine|violon|violino|geige)\b/],
+  ["viola", /\b(viola|bratsche|alto)\b/],
+  ["cello", /\b(cello|violoncello|violoncelle|violoncell)\b/],
+  ["double bass", /\b(double bass|kontrabass|contrebasse|contrabbasso)\b/],
+  ["flute", /\b(flute|flote|querflote|flauto|traversflote)\b/],
+  ["oboe", /\b(oboe|hautbois)\b/],
+  ["clarinet", /\b(clarinet|klarinette|clarinette|clarinetto)\b/],
+  ["bassoon", /\b(bassoon|fagott|basson|fagotto)\b/],
+  ["horn", /\b(horn|corno)\b/],
+  ["trumpet", /\b(trumpet|trompete|trompette|tromba)\b/],
+  ["trombone", /\b(trombone|posaune)\b/],
+  ["tuba", /\btuba\b/],
+  ["piano", /\b(piano|klavier|pianoforte)\b/],
+  ["harpsichord", /\b(harpsichord|cembalo|clavecin)\b/],
+  ["organ", /\b(organ|orgel|orgue|organo)\b/],
+  ["harp", /\b(harp|harfe|harpe|arpa)\b/],
+  ["guitar", /\b(guitar|gitarre|guitare|chitarra)\b/],
+  ["mandolin", /\b(mandolin|mandoline|mandolino)\b/],
+  ["recorder", /\b(recorder|blockflote|flauto dolce)\b/],
+  ["saxophone", /\b(saxophone|saxophon)\b/],
+];
+const instrumentsIn = memo((title: string) => {
+  const t = normalize(title);
+  return new Set(NAMED_INSTRUMENTS.filter(([, re]) => re.test(t)).map(([i]) => i));
+});
+
+/**
+ * Told apart by a number in a catalogue or series, a key, or the instruments they name:
+ * "No. 2" and "No. 3", "in D major" and "in F major", "Cello Concerto" and "Concerto,
+ * Cembalo obbligato"
+ */
+function distinct(title: string, numbers: Set<string>, other: string): boolean {
+  // Different numbers in a catalogue both use (numbers in different catalogues say nothing)
+  const theirs = catalogueKeys(other);
+  const system = (k: string) => k.slice(0, k.indexOf(":"));
+  for (const s of new Set([...numbers].map(system))) {
+    const mine = [...numbers].filter((k) => system(k) === s);
+    if ([...theirs].some((k) => system(k) === s) && !mine.some((k) => theirs.has(k))) return true;
+  }
+  const no = (t: string) => /\b(?:No|Nr)\.?\s*(\d+)\b/i.exec(t)?.[1] ?? null;
+  const [n1, n2] = [no(title), no(other)];
+  if (n1 !== null && n2 !== null && n1 !== n2) return true;
+  const [k1, k2] = [musicalKey(title), musicalKey(other)];
+  if (k1 && k2 && k1 !== k2) return true;
+  const [i1, i2] = [instrumentsIn(title), instrumentsIn(other)];
+  return i1.size > 0 && i2.size > 0 && ![...i1].some((i) => i2.has(i));
+}
+
+/**
+ * Whether a work matched by title alone (no catalogue number in common) can be the work
+ * a record describes, given what the record says of its line-up and year: line-ups that
+ * differ (unless one is vague), or years more than two apart, say they're different
+ * works; and a title that's only a genre ("Concerto", "Studien"), with no number in a
+ * series either, needs the same line-up to go on.
+ */
+function titleOnlyFits(x: BuildWork, title: string, lineup: string | null, year: number | null): boolean {
+  if (year && x.year !== undefined && Math.abs(year - x.year) > 2) return false;
+  const own = [...x.ensembles].filter(([, m]) => !m.arr).map(([k]) => k);
+  const same = !!lineup && own.includes(lineup);
+  if (onlyGenre(title) && !/\b(?:no|nr)\.?\s*\d/i.test(title) && !same) return false;
+  if (lineup && own.length && !same && !vague(lineup) && !own.some(vague)) return false;
+  return true;
+}
+
 /** Every spelling of a composer's name we know, folded for search. */
-const ftsNames = (c: BuildComposer) => [...new Set([c.name, sortName(c), c.imslp ?? ""].map(normalize))].join(" ");
+const ftsNames = (c: BuildComposer) => [...new Set([c.name, sortName(c), c.imslp ?? ""].map(searchText))].join(" ");
 
 const players = (key: string) => Object.values(parseEnsembleKey(key)).reduce((s, n) => s + n, 0);
 
@@ -224,9 +337,32 @@ export interface BuildResult {
 export interface Previous {
   work: PreviousIds;
   composer: PreviousIds;
+  /** What each id showed, to tell which part of a split keeps it */
+  works: Map<string, { title: string; year: number | null; composer?: string | null }>;
+  composers: Map<string, { name: string }>;
+  /** Ids retired before, by "entity|id" */
+  retired?: Map<string, RetiredRow>;
 }
 
-export const NONE: Previous = { work: NO_PREVIOUS, composer: NO_PREVIOUS };
+interface RetiredRow {
+  entity: "work" | "composer";
+  id: string;
+  title: string;
+  composer: string | null;
+  since: string;
+  reason: "uncertain" | "gone";
+  see_also: string;
+}
+
+export const NONE: Previous = { work: NO_PREVIOUS, composer: NO_PREVIOUS, works: new Map(), composers: new Map() };
+
+/**
+ * A composer's name and birth year, as an anchor: the weakest, but all some composers have
+ * (one only Open Opus or LIBRIS knows), and all that datasets from before the anchors
+ * table kept of them. Not the death year: sources disagree on it (Besozzi: 1775 or 1793),
+ * and reconciling composers tolerates that, so their URLs must too.
+ */
+const nameAnchor = (name: string, born: number | null | undefined) => (born ? `name:${normalize(name)}|${born}` : null);
 
 /** Merges the sources into a new database at `out`, keeping ids from `previous`. */
 export function build(input: BuildInput, out: string, previous: Previous, builtAt = new Date()): BuildResult {
@@ -236,9 +372,14 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
   const byComposer = new Map<string, BuildWork[]>();
   const imslpByTitle = new Map<string, BuildWork>();
   const lineupSources = new Map<string, Map<SourceId, Set<string>>>();
+  /** Anchors of records that are parts of these works, whose ids redirect to them */
+  const absorbed = new Map<BuildWork, string[]>();
+  /** Anchors of records left out as possibly being one of these works */
+  const uncertain = new Map<string, BuildWork[]>();
   const stats = {
     matched: { wikidata: 0, wikipedia: 0, openopus: 0, mutopia: 0, libris: 0, gnd: 0, rism: 0 },
     added: { wikipedia: 0, wikidata: 0, openopus: 0, libris: 0, gnd: 0 },
+    leftOut: { gnd: 0 },
   };
 
   const composer = (key: string, init: () => Omit<BuildComposer, "key" | "sitelinks">): BuildComposer => {
@@ -268,6 +409,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     signals: new Set(),
     ensembles: new Map(),
     libraries: new Set(),
+    readings: [],
     extraLinks: [],
   });
 
@@ -328,10 +470,13 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     if (duration) w.duration = duration;
     const movements = page.movements && parseMovements(page.movements);
     if (movements) w.movements = movements;
-    const readings = (page.parts ?? []).map((p) => orchestrationFromParts(p).orchestration);
+    const ref = String(w.imslp!.pageid);
+    for (const p of page.parts ?? []) {
+      const r = orchestrationFromParts(p);
+      w.readings.push({ o: r.orchestration, source: "parts", ref, unresolved: r.unresolved, named: r.named });
+    }
     const text = page.instrumentation && orchestrationFromText(page.instrumentation);
-    if (text) readings.push(text.orchestration);
-    if (readings.length) w.orchestration = { o: mergeOrchestrations(readings), source: "imslp", ref: String(w.imslp!.pageid) };
+    if (text) w.readings.push({ o: text.orchestration, source: "text", ref, unresolved: text.unresolved, named: text.named });
     // Matched against the line-ups IMSLP lists the work as arranged for
     const arranged = new Set([...w.ensembles].filter(([, m]) => m.arr).map(([k]) => k));
     if (page.arrangements) w.arrangements = readArrangements(page.arrangements, arranged);
@@ -402,7 +547,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     if (existing) return existing;
     const composerKey = d.composer ? composerKeyByQid.get(d.composer) : undefined;
     if (!composerKey || !composers.has(composerKey) || !d.label) return null; // too little to show
-    const matched = matchWork(d.label, byComposer.get(composerKey) ?? []);
+    const matched = matchWork(d.label, byComposer.get(composerKey) ?? [], (x, byNumber) => byNumber || d.year === undefined || x.year === undefined || Math.abs(d.year - x.year) <= 2);
     if (matched) {
       attachWikidata(matched, d);
       stats.matched[via]++;
@@ -442,20 +587,47 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     }
   }
 
+  // ---- Composers of GND works (from Wikidata, by GND id) ---------------------------
+  // Registered before the sources that match composers by name and dates (Open Opus,
+  // Mutopia, LIBRIS), so those find them instead of creating them again.
+  const composerByGnd = new Map<string, string>();
+  for (const c of composers.values()) if (c.gnd) composerByGnd.set(c.gnd, c.key);
+  for (const g of Object.values(gnd?.composers ?? {})) {
+    if (composerByGnd.has(g.gnd) || (!g.label && !g.imslp)) continue;
+    const imslpName = g.imslp?.replaceAll("_", " ") ?? null;
+    const key = composerKeyByQid.get(g.qid) ?? imslpName ?? `wd:${g.qid}`;
+    const c = composer(key, () => ({ name: g.label ?? displayName(key), imslp: imslpName ?? undefined }));
+    c.wikidata ??= g.qid;
+    c.gnd ??= g.gnd;
+    c.born ??= g.born ?? undefined;
+    c.died ??= g.died ?? undefined;
+    c.sitelinks = Math.max(c.sitelinks, g.sitelinks);
+    composerByGnd.set(g.gnd, key);
+  }
+
   // ---- 5. Open Opus ---------------------------------------------------------
   // Open Opus names composers like Wikidata's English labels ("Sergei Prokofiev"), so
   // labels bridge to IMSLP names ("Prokofiev, Sergey"); unambiguous labels only.
   const composerIndex = new ComposerIndex([...composers.keys()].filter((k) => !k.startsWith("wd:")));
   const byLabel = new Map<string, string | null>();
-  for (const c of Object.values(wd?.composers ?? {})) {
-    if (!c.label) continue;
-    const label = normalize(c.label);
-    const key = wdKey.get(c.qid)!;
-    byLabel.set(label, byLabel.has(label) && byLabel.get(label) !== key ? null : key);
-  }
+  const labelled = (label: string, key: string) => {
+    const l = normalize(label);
+    byLabel.set(l, byLabel.has(l) && byLabel.get(l) !== key ? null : key);
+  };
+  for (const c of Object.values(wd?.composers ?? {})) if (c.label) labelled(c.label, wdKey.get(c.qid)!);
+  for (const g of Object.values(gnd?.composers ?? {})) if (g.label && composerByGnd.has(g.gnd)) labelled(g.label, composerByGnd.get(g.gnd)!);
+  // Else a composer of the same full name born the same year (and, if both sources know
+  // it, dying the same year): a shared name alone isn't enough, nor two unknown dates.
+  const sameNameAndDates = (name: string, born: number | null, died: number | null) => {
+    if (!born) return undefined;
+    const found = [...composers.values()].filter(
+      (c) => normalize(c.name) === name && c.born !== undefined && Math.abs(c.born - born) <= 1 && (c.died === undefined) === (died === null) && (!died || Math.abs(c.died! - died) <= 1),
+    );
+    return found.length === 1 ? found[0]!.key : undefined;
+  };
   for (const oc of oo?.composers ?? []) {
     const ooName = normalize(oc.completeName);
-    const key = byLabel.get(ooName) ?? composerIndex.find(oc.name, oc.completeName) ?? `oo:${ooName}`;
+    const key = byLabel.get(ooName) ?? composerIndex.find(oc.name, oc.completeName) ?? sameNameAndDates(ooName, oc.born, oc.died) ?? `oo:${ooName}`;
     const c = composer(key, () => ({ name: oc.completeName }));
     c.openopus ??= ooName;
     c.born ??= oc.born ?? undefined;
@@ -487,24 +659,6 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
   for (const w of works.values()) {
     const r = w.musicbrainz ? mb?.recordings[w.musicbrainz] : undefined;
     if (r) w.recordings = r.count;
-  }
-
-  // ---- Composers of GND works (from Wikidata, by GND id) ---------------------------
-  // Registered before the sources that match composers by name and dates (Mutopia,
-  // LIBRIS), so those find them instead of creating them again.
-  const composerByGnd = new Map<string, string>();
-  for (const c of composers.values()) if (c.gnd) composerByGnd.set(c.gnd, c.key);
-  for (const g of Object.values(gnd?.composers ?? {})) {
-    if (composerByGnd.has(g.gnd) || (!g.label && !g.imslp)) continue;
-    const imslpName = g.imslp?.replaceAll("_", " ") ?? null;
-    const key = composerKeyByQid.get(g.qid) ?? imslpName ?? `wd:${g.qid}`;
-    const c = composer(key, () => ({ name: g.label ?? displayName(key), imslp: imslpName ?? undefined }));
-    c.wikidata ??= g.qid;
-    c.gnd ??= g.gnd;
-    c.born ??= g.born ?? undefined;
-    c.died ??= g.died ?? undefined;
-    c.sitelinks = Math.max(c.sitelinks, g.sitelinks);
-    composerByGnd.set(g.gnd, key);
   }
 
   // ---- 7. Mutopia ------------------------------------------------------------
@@ -545,7 +699,11 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     if (r.collection || r.composers.length !== 1) continue;
     const lc = r.composers[0]!;
     if (!lc.born) continue;
-    const found = (bySurname.get(surnameKey(lc.family)) ?? []).filter((c) => near(c.born, lc.born) && (!lc.died || !c.died || near(c.died, lc.died)));
+    const sameSurname = bySurname.get(surnameKey(lc.family)) ?? [];
+    let found = sameSurname.filter((c) => near(c.born, lc.born) && (!lc.died || !c.died || near(c.died, lc.died)));
+    // Death years disagree now and then (Besozzi: 1775 or 1793): the same full name and
+    // birth year is still the same person
+    if (!found.length) found = sameSurname.filter((c) => near(c.born, lc.born) && normalize(c.name) === normalize(`${lc.given ?? ""} ${lc.family}`));
     let c: BuildComposer | null = found.length === 1 ? found[0]! : null;
     const lineup = r.arranged || ANTHOLOGY.test(r.title) ? null : librisRecordLineup(r);
     // The title less its line-up ("Danzas argentinas, pour piano"), when that still names a
@@ -555,7 +713,8 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     const editionKey = (ck: string) => (r.uniform ? `${ck}|${normalize(r.uniform)}` : bare ? `${ck}|${lineup}|${normalize(bare)}` : null);
     let w: BuildWork | null = null;
     if (c) w = fromLibris.get(editionKey(c.key) ?? "") ?? null;
-    if (c && !w) for (const t of [r.uniform, r.title]) if (t && (w = matchWork(t, byComposer.get(c.key) ?? []))) break;
+    if (c && !w)
+      for (const t of [r.uniform, r.title]) if (t && (w = matchWork(t, byComposer.get(c.key) ?? [], (x, byNumber) => byNumber || titleOnlyFits(x, t, lineup, null)))) break;
     if (c && !w && bare) w = matchWork(bare, (byComposer.get(c.key) ?? []).filter((x) => x.ensembles.has(lineup!)));
     if (w) {
       stats.matched.libris++;
@@ -584,75 +743,135 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
 
   // ---- 9. GND -------------------------------------------------------------------
   // The German National Library's musical works. Composers are GND person ids, bridged
-  // through Wikidata. A GND work is one we have when Wikidata says so, or when a
-  // catalogue number matches. Otherwise it comes in with its instrumentation, but only
-  // where that can't duplicate a work we have: the composer has nothing for that line-up
-  // yet, or everything they have for it is numbered and none of the numbers match.
+  // through Wikidata. A GND work is one we have when Wikidata says so, when a catalogue
+  // number matches, or when its title does and nothing says otherwise: a line-up or a
+  // year that differ, or a title that's only a genre ("Konzerte", "Studien") without the
+  // same line-up to go on. Otherwise it comes in with its instrumentation, unless it
+  // could be a work we have under another title: one of the composer's works for the
+  // line-up of the same genre, or sharing a telling word, that no number or key tells
+  // apart. Records of parts of works ("Lakmé. Où va la jeune Indoue") link to a work we
+  // have, but never come in on their own. GND says its records are distinct works, so
+  // they're compared with the works from other sources only, not with each other: the
+  // outcome doesn't depend on the order they come in.
   const byWikidataWork = new Map<string, BuildWork>();
   const byGndWork = new Map<string, BuildWork>();
   for (const w of works.values()) {
     if (w.wikidata) byWikidataWork.set(w.wikidata, w);
     if (w.gnd) byGndWork.set(w.gnd.id, w);
   }
+  const beforeGnd = new Map([...byComposer].map(([k, list]) => [k, [...list]]));
   // A work's GND record. A second one is kept as a link, so an id it had as a work of its
   // own redirects here.
-  const addGnd = (w: BuildWork, id: string) => {
-    if (!w.gnd || (w.gnd.source !== "gnd" && w.gnd.id === id)) w.gnd = { id, source: "gnd" };
-    else if (w.gnd.id !== id && !w.extraLinks.some((l) => l.provider === "gnd" && l.ref === id))
-      w.extraLinks.push({ provider: "gnd", ref: id, url: gndUrl(id), label: null, source: "gnd" });
+  const addGnd = (w: BuildWork, g: GndWork) => {
+    if (!w.gnd || (w.gnd.source !== "gnd" && w.gnd.id === g.id)) w.gnd = { id: g.id, source: "gnd" };
+    else if (w.gnd.id !== g.id && !w.extraLinks.some((l) => l.provider === "gnd" && l.ref === g.id))
+      w.extraLinks.push({ provider: "gnd", ref: g.id, url: gndUrl(g.id), label: null, source: "gnd" });
+    for (const a of gndAliases(g)) w.aliases.add(tidy(a));
   };
-  for (const g of gnd?.works ?? []) {
-    if (/\b(?:bearb|arr)\./i.test(g.name)) continue; // arrangements
-    const parts = gndLineup(g.media);
+  // A record left out that had a page before: its id is retired, and its URL says which
+  // works it may be (being uncertain, it can't redirect to one of them)
+  const leftOut = (g: GndWork, candidates: BuildWork[]) => {
+    stats.leftOut.gnd++;
+    if (previous.work.anchors.has(`gnd:${g.id}`)) uncertain.set(`gnd:${g.id}`, candidates);
+  };
+  // Not arrangements; in GND's id order, so that nothing depends on the order of the dump
+  const gndWorks = (gnd?.works ?? []).filter((g) => !/\b(?:bearb|arr)\./i.test(g.name)).sort((a, b) => a.id.localeCompare(b.id));
+  // What records matched to works from other sources say of them (a year, a line-up),
+  // applied once all are read: every record is judged against those works as they were
+  const claims = new Map<BuildWork, { year: number | null; players: Ensemble | null; medium: string }[]>();
+  // Works GND alone gives us, by composer: its own duplicates are recognised by number
+  const fromGnd = new Map<string, BuildWork[]>();
+  const parts = new Set(gndWorks.filter((g) => gndPart(g)));
+  for (const g of [...gndWorks.filter((g) => !parts.has(g)), ...parts]) {
+    const players = gndLineup(g.media);
+    const lineup = players && ensembleKey(players);
+    const year = gndYear(g);
     const medium = g.media.map((m) => (m.count > 1 ? `${m.name} (${m.count})` : m.name)).join(", ");
     const composerKey = g.composer ? composerByGnd.get(g.composer) : undefined;
+    const theirs = composerKey ? (beforeGnd.get(composerKey) ?? []) : [];
+    const part = gndPart(g);
+    // A number in a set: "Sonata, op. 11, No. 2 in E major", not "Sonaten, op. 11. Nr. 2 (E-Dur)"; a song: "Jägerlied"
+    const title = part?.numbered ? `${gndTitle(part.parent)}, ${gndTitle(part.part).replace(/\b(?:Nr|N)\.\s*/, "No. ")}` : part?.standalone ? part.part : gndTitle(g.name);
+    const fits = (x: BuildWork) => titleOnlyFits(x, title, lineup, year);
     let w = byGndWork.get(g.id) ?? (g.wikidata ? byWikidataWork.get(g.wikidata) : undefined) ?? null;
-    if (!w && composerKey) w = matchWork(gndMatchTitle(g), byComposer.get(composerKey) ?? []);
-    if (w) {
-      stats.matched.gnd++;
-      addGnd(w, g.id);
-      if (w.year === undefined && g.year) w.year = g.year;
-      if (parts && !hasOwnInstrumentation(w) && titleFitsPlayers(w.title, parts)) addMembership(w, parts, false, "gnd", medium);
+    // A part's work, if we have it: matching the part by its numbers can land there too
+    // ("…, op. 1. Lovely song" and "…, Op.1"), and then it's part of it, not it
+    const parentTitle = part && gndTitle(part.parent);
+    const whole =
+      !w && parentTitle && composerKey ? matchWork(parentTitle, byComposer.get(composerKey) ?? [], (x, byNumber) => byNumber || titleOnlyFits(x, parentTitle, lineup, null)) : null;
+    if (!w && composerKey) w = matchWork(gndMatchTitle(g), theirs, (x, byNumber) => byNumber || fits(x));
+    if (whole && (!w || w === whole)) {
+      if (previous.work.anchors.has(`gnd:${g.id}`)) (absorbed.get(whole) ?? absorbed.set(whole, []).get(whole)!).push(`gnd:${g.id}`);
       continue;
     }
-    if (!parts || !composerKey) continue;
-    const title = gndTitle(g.name);
     // The same title as one of the composer's works, with no key or number saying
     // otherwise, is that work (IMSLP often files choral works under a generic line-up).
     const numbers = catalogueKeys(gndMatchTitle(g));
-    const sameTitle = (byComposer.get(composerKey) ?? []).filter(
-      (x) => sameWorkByTitle(x.title, title, numbers) || (x.bareTitle && x.ensembles.has(ensembleKey(parts)) && sameWorkByTitle(x.bareTitle, title, numbers)),
-    );
-    if (sameTitle.length === 1) {
-      const same = sameTitle[0]!;
+    // GND's other names count too ("Estampien" is also "Estampes")
+    const titles = [title, ...gndAliases(g)];
+    const sameTitle = w
+      ? []
+      : theirs.filter(
+          (x) => titles.some((t) => sameWorkByTitle(x.title, t, numbers) || (x.bareTitle && lineup && x.ensembles.has(lineup) && sameWorkByTitle(x.bareTitle, t, numbers))) && fits(x),
+        );
+    if (sameTitle.length === 1) w = sameTitle[0]!;
+    if (w) {
       stats.matched.gnd++;
-      addGnd(same, g.id);
+      addGnd(w, g);
+      claims.set(w, [...(claims.get(w) ?? []), { year, players, medium }]);
       continue;
     }
-    // A work this record brought in before stays, though it might now look like one we have:
-    // its page and id are out there.
-    const hadPage = previous.work.anchors.has(`gnd:${g.id}`);
-    if (sameTitle.length > 1 && !hadPage) continue; // can't tell which
-    const key = ensembleKey(parts);
-    const rivals = (byComposer.get(composerKey) ?? []).filter((x) => x.ensembles.has(key));
-    // Different catalogue numbers, or different numbers in a series ("No. 2", "No. 3").
-    const no = (t: string) => /\bNo\.?\s*(\d+)\b/i.exec(t)?.[1] ?? null;
-    const ours = no(title);
-    const distinct = (x: BuildWork) => {
-      const theirs = catalogueKeys(x.title);
-      if (numbers.size && theirs.size && ![...theirs].some((k) => numbers.has(k))) return true;
-      const n = no(x.title);
-      return ours !== null && n !== null && n !== ours;
-    };
-    if (rivals.length && !rivals.every(distinct) && !hadPage) continue;
-    if (!titleFitsPlayers(title, parts)) continue;
+    if (!composerKey) continue;
+    // A duplicate in GND itself: the same numbers, for the same line-up, as a work it gave us
+    const twin = lineup && matchWork(gndMatchTitle(g), fromGnd.get(composerKey) ?? [], (x, byNumber) => byNumber && x.ensembles.has(lineup));
+    if (twin) {
+      stats.matched.gnd++;
+      addGnd(twin, g);
+      continue;
+    }
+    // A part: its URL, if it had one, goes to the work it's part of. One we don't have the
+    // work of comes in on its own if people play it so (a song, a number in a set), not
+    // if it's a movement.
+    if (part) {
+      if (!part.standalone) {
+        leftOut(g, []);
+        continue;
+      }
+    }
+    if (!players || !lineup) continue;
+    if (sameTitle.length > 1) {
+      leftOut(g, sameTitle);
+      continue;
+    }
+    const rivals = theirs.filter((x) => {
+      const own = [...x.ensembles].filter(([, m]) => !m.arr).map(([k]) => k);
+      if (!own.includes(lineup) && !own.some(vague)) return false;
+      return (sameGenre(title, x.title) || sharesWord(title, x.title) || (!!x.bareTitle && sharesWord(title, x.bareTitle))) && !distinct(title, numbers, x.title);
+    });
+    if (rivals.length) {
+      leftOut(g, rivals);
+      continue;
+    }
+    if (!titleFitsPlayers(title, players)) continue;
+    if (COLLECTION.test(title)) continue; // "Werke": a composer's works, not one of them
     w = newWork(`gnd:${g.id}`, title, composerKey);
     w.gnd = { id: g.id, source: "gnd" };
-    if (g.year) w.year = g.year;
+    if (year) w.year = year;
+    for (const a of gndAliases(g)) w.aliases.add(tidy(a));
+    if (part) w.aliases.add(tidy(gndTitle(g.name))); // "Chöre, op. 27. Jägerlied": findable by the set too
     addWork(w);
     byGndWork.set(g.id, w);
-    addMembership(w, parts, false, "gnd", medium);
+    fromGnd.set(composerKey, [...(fromGnd.get(composerKey) ?? []), w]);
+    addMembership(w, players, false, "gnd", medium);
     stats.added.gnd++;
+  }
+  // What the matched records say: a year when they agree on one (records that disagree
+  // leave it unknown), and their line-ups where the work has no instrumentation of its own
+  for (const [w, list] of claims) {
+    const years = list.map((c) => c.year).filter((y): y is number => !!y);
+    if (w.year === undefined && years.length && Math.max(...years) - Math.min(...years) <= 2) w.year = Math.min(...years);
+    if (hasOwnInstrumentation(w)) continue;
+    for (const c of list) if (c.players && titleFitsPlayers(w.title, c.players)) addMembership(w, c.players, false, "gnd", c.medium);
   }
 
   // ---- 10. RISM ------------------------------------------------------------------
@@ -668,7 +887,6 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     index(`${w.composer}|=${bareTitle(w.title)}`, w);
   }
   const best = new Map<BuildWork, { id: string; rank: number; label: string }[]>();
-  const rismScorings = new Map<BuildWork, { o: Orchestration; id: string }[]>();
   for (const src of rism?.sources ?? []) {
     const person = rism!.people[src.person];
     const composerKey = (person?.wikidata && composerKeyByQid.get(person.wikidata)) || (person?.gnd && composerByGnd.get(person.gnd)) || undefined;
@@ -684,7 +902,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     composers.get(composerKey)!.rism ??= src.person;
     for (const h of src.holdings) w.libraries.add(h.siglum);
     const o = src.scoring && !src.excerpt ? orchestrationFromRism(src.scoring) : null;
-    if (o && isFullOrchestra(o)) rismScorings.set(w, [...(rismScorings.get(w) ?? []), { o, id: src.id }]);
+    if (o) w.readings.push({ o, source: "rism", ref: src.id, unresolved: [], named: Object.keys(o).length });
     const h = src.holdings[0]!;
     const library = rism!.libraries[h.siglum];
     const shelf = h.shelf && !/^\[.*\]$/.test(h.shelf) ? h.shelf : null; // not "[no indication]"
@@ -693,23 +911,6 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     list.push({ id: src.id, rank: rismRank(src.type) + (src.excerpt ? 0.5 : 0), label });
     best.set(w, list);
   }
-  // A scoring from the copies, for works IMSLP gave none (or only an incomplete one):
-  // the one most copies agree on, and of those the largest (copies lose parts more often
-  // than they gain them).
-  for (const [w, list] of rismScorings) {
-    if (w.orchestration && isFullOrchestra(w.orchestration.o)) continue;
-    const votes = new Map<string, { o: Orchestration; id: string; n: number }>();
-    for (const { o, id } of list) {
-      const key = formatOrchestration(o);
-      const v = votes.get(key) ?? { o, id, n: 0 };
-      v.n++;
-      votes.set(key, v);
-    }
-    const size = (o: Orchestration) => Object.values(o).reduce((a, b) => a + b, 0);
-    const pick = [...votes.values()].sort((a, b) => b.n - a.n || size(b.o) - size(a.o) || Number(a.id) - Number(b.id))[0]!;
-    w.orchestration = { o: pick.o, source: "rism", ref: pick.id };
-  }
-
   // A few copies per work: the composer's own hand first, then prints.
   for (const [w, list] of best) {
     for (const s of list.sort((a, b) => a.rank - b.rank || Number(a.id) - Number(b.id)).slice(0, 3)) {
@@ -731,11 +932,28 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
   const usedComposers = [...new Set(workList.map((w) => w.composer).filter((k): k is string => !!k))]
     .map((k) => composers.get(k)!)
     .sort((a, b) => a.key.localeCompare(b.key));
-  const composerAnchors = (c: BuildComposer) =>
-    [c.wikidata && `wikidata:${c.wikidata}`, c.imslp && `imslp:${c.imslp}`, c.gnd && `gnd:${c.gnd}`, c.openopus && `openopus:${c.openopus}`, c.libris && `libris:${c.libris}`, `key:${c.key}`].filter(
-      (a): a is string => !!a,
-    );
-  const composerIds = assignIds(usedComposers.map(composerAnchors), previous.composer, COMPOSER_SCHEMES);
+  // A name and dates two composers share identify neither
+  const names = new Map<string, number>();
+  for (const c of usedComposers) {
+    const a = nameAnchor(c.name, c.born);
+    if (a) names.set(a, (names.get(a) ?? 0) + 1);
+  }
+  const composerAnchors = (c: BuildComposer) => {
+    const byName = nameAnchor(c.name, c.born);
+    return [
+      c.wikidata && `wikidata:${c.wikidata}`,
+      c.imslp && `imslp:${c.imslp}`,
+      c.gnd && `gnd:${c.gnd}`,
+      c.openopus && `openopus:${c.openopus}`,
+      c.libris && `libris:${c.libris}`,
+      `key:${c.key}`,
+      byName && names.get(byName) === 1 && byName,
+    ].filter((a): a is string => !!a);
+  };
+  const composerAnchorLists = usedComposers.map(composerAnchors);
+  const composerIds = assignIds(composerAnchorLists, previous.composer, COMPOSER_SCHEMES, (i, id) =>
+    normalize(usedComposers[i]!.name) === normalize(previous.composers.get(id)?.name ?? "") ? 1 : 0,
+  );
   const composerId = new Map(usedComposers.map((c, i) => [c.key, composerIds.ids[i]!]));
 
   const workAnchors = (w: BuildWork) =>
@@ -749,13 +967,28 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
       // A record that made a work of its own before may now be an edition of another
       ...w.extraLinks.filter((l) => l.provider === "libris").map((l) => `libris:${l.ref}`),
     ].filter((a): a is string => !!a);
-  const workIds = assignIds(workList.map(workAnchors), previous.work, WORK_SCHEMES);
+  const workAnchorLists = workList.map(workAnchors);
+  const partAnchorLists = workList.map((w) => absorbed.get(w) ?? []);
+  // Of the parts of a split, the one with the title and year the id showed keeps it
+  const workIds = assignIds(
+    workAnchorLists,
+    previous.work,
+    WORK_SCHEMES,
+    (i, id) => {
+      const was = previous.works.get(id);
+      if (!was) return 0;
+      const w = workList[i]!;
+      return (normalize(w.title) === normalize(was.title) ? 2 : 0) + (was.year !== null && w.year === was.year ? 1 : 0);
+    },
+    partAnchorLists,
+  );
 
   // ---- Write ------------------------------------------------------------------
   const db = new DatabaseSync(out);
   // Rows go in whatever order is convenient; references are checked once at the end.
   db.exec("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; PRAGMA foreign_keys = OFF;");
   db.exec(TABLES);
+  db.exec(BUILD_TABLES);
   db.exec("BEGIN");
 
   const insertComposer = db.prepare("INSERT INTO composers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
@@ -767,7 +1000,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
   const insertWorkFts = db.prepare("INSERT INTO works_fts (rowid, title, composer, aliases, keys, arrangers) VALUES (?, ?, ?, ?, ?, ?)");
   const insertArrangement = db.prepare("INSERT INTO arrangements VALUES (?, ?, ?, ?, ?, ?, ?)");
   const insertComposerFts = db.prepare("INSERT INTO composers_fts (rowid, name) VALUES (?, ?)");
-  const insertOrchestration = db.prepare(`INSERT INTO orchestrations VALUES (${Array(19).fill("?").join(", ")})`);
+  const insertOrchestration = db.prepare(`INSERT INTO orchestrations VALUES (${Array(8 + ORCHESTRA_KEYS.length).fill("?").join(", ")})`);
 
   // A provider's record belongs to one work (or composer). Rarely two sources link the
   // same record to different works (two Wikidata items with one MusicBrainz id): the
@@ -799,13 +1032,16 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
   });
 
   // A scoring is kept for works written for orchestra (not only arranged for one: any
-  // line-up with an orchestra in it, "orchestra*2" and "voices with orchestra" too), when
-  // it reads as a whole orchestra; one without strings only for "orchestra without strings".
+  // line-up with an orchestra in it, "orchestra*2" and "voices with orchestra" too), from
+  // the readings of a whole orchestra (one without strings for "orchestra without strings",
+  // three or more wind, brass or percussion instruments); see chooseScoring for how far
+  // it's to be trusted.
+  const band = (o: Orchestration) => !o.str && isFullOrchestra({ ...o, str: 1 }) && Object.keys(o).filter((k) => !k.includes("/") && o[k]).length >= 3;
   const orchestral = (w: BuildWork) => {
-    if (!w.orchestration) return null;
+    if (!w.readings.length) return null;
     const ids = [...w.ensembles].filter(([, m]) => !m.arr).flatMap(([k]) => Object.keys(parseEnsembleKey(k)));
-    if (ids.some((id) => id.includes("orchestra") && id !== "orchestra without strings")) return isFullOrchestra(w.orchestration.o) ? w.orchestration : null;
-    if (ids.includes("orchestra without strings") && !w.orchestration.o.str && Object.keys(w.orchestration.o).length >= 2) return w.orchestration;
+    if (ids.some((id) => id.includes("orchestra") && id !== "orchestra without strings")) return chooseScoring(w.readings, isFullOrchestra);
+    if (ids.includes("orchestra without strings")) return chooseScoring(w.readings, band);
     return null;
   };
   let orchestrations = 0;
@@ -819,7 +1055,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     if (s >= CORE_SCORE) core++;
     // Wikidata publication dates are often a modern edition's: keep years within the composer's life (roughly).
     const plausible =
-      w.year !== undefined && w.year <= builtAt.getUTCFullYear() && (!c?.born || (w.year >= c.born + 5 && (!c.died || w.year <= c.died + 30)));
+      w.year !== undefined && w.year <= builtAt.getUTCFullYear() && (!c?.born || w.year >= c.born + 5) && (!c?.died || w.year <= c.died + 30);
 
     // Main line-up: an original one, the best attested, then the smallest.
     const memberships = [...w.ensembles].sort(
@@ -849,7 +1085,17 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     );
     const orch = orchestral(w);
     if (orch) {
-      insertOrchestration.run(id, formatOrchestration(orch.o), JSON.stringify(orch.o), ...Object.values(orchestraColumns(orch.o)), orch.source, orch.ref);
+      insertOrchestration.run(
+        id,
+        formatOrchestration(orch.o),
+        JSON.stringify(orch.o),
+        orch.status,
+        orch.basis,
+        JSON.stringify(orch.unresolved),
+        ...ORCHESTRA_KEYS.map((k) => orch.o[k] ?? 0),
+        orch.source,
+        orch.ref,
+      );
       orchestrations++;
     }
     for (const [key, m] of memberships) {
@@ -874,11 +1120,11 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     if (w.openopus) link("work", id, "openopus", w.openopus, null, "openopus");
     w.extraLinks.forEach((l, i) => link("work", id, l.provider, l.ref, l.url, l.source, l.label, i));
 
-    // Folded to ASCII words, like search queries (see worker/queries.ts); keys add the
+    // Folded like search queries (searchText; see worker/queries.ts); keys add the
     // compact catalogue forms people type ("k581", "bwv1007", "op18").
     const keys = [...catalogueKeys(w.title)].map((k) => k.split("/")[0]!.replaceAll(":", ""));
-    const arrangers = new Set((w.arrangements ?? []).map((a) => a.arranger).filter((a): a is string => !!a && a !== THE_COMPOSER).map(normalize));
-    insertWorkFts.run(n, own, c ? ftsNames(c) : "", aliases.map(normalize).join(" "), [...new Set(keys)].join(" "), [...arrangers].join(" "));
+    const arrangers = new Set((w.arrangements ?? []).map((a) => a.arranger).filter((a): a is string => !!a && a !== THE_COMPOSER).map(searchText));
+    insertWorkFts.run(n, searchText(w.title), c ? ftsNames(c) : "", aliases.map(searchText).join(" "), [...new Set(keys)].join(" "), [...arrangers].join(" "));
   });
 
   for (const key of [...lineupCounts.keys()].sort()) {
@@ -889,6 +1135,60 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
 
   for (const [old, now] of composerIds.redirects) insertRedirect.run("composer", old, now);
   for (const [old, now] of workIds.redirects) insertRedirect.run("work", old, now);
+
+  // Every anchor, for the next build; also those the previous dataset had that no entity has
+  // now (a record that left its source, for now), with the id they had or that id's
+  // redirect: should the record come back, it finds its id.
+  const insertAnchor = db.prepare("INSERT INTO anchors VALUES (?, ?, ?, ?)");
+  const writeAnchors = (entity: "work" | "composer", lists: string[][], { ids, redirects }: { ids: string[]; redirects: Map<string, string> }, prev: PreviousIds) => {
+    const seen = new Set<string>();
+    lists.forEach((anchors, i) =>
+      anchors.forEach((a, position) => {
+        if (!seen.has(a)) seen.add(a), insertAnchor.run(entity, a, ids[i]!, position);
+      }),
+    );
+    for (const [a, id] of prev.anchors) {
+      if (!seen.has(a)) seen.add(a), insertAnchor.run(entity, a, redirects.get(id) ?? id, -1);
+    }
+  };
+  writeAnchors("composer", composerAnchorLists, composerIds, previous.composer);
+  writeAnchors("work", workAnchorLists.map((list, i) => [...list, ...partAnchorLists[i]!]), workIds, previous.work);
+
+  // Ids that were here before and aren't now, nor redirect: retired, saying what they were
+  // and why they're gone. Those retired before stay so, unless they're back.
+  const insertRetired = db.prepare("INSERT INTO retired VALUES (?, ?, ?, ?, ?, ?, ?)");
+  const version = builtAt.toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z";
+  const workIdOf = new Map(workList.map((w, i) => [w, workIds.ids[i]!]));
+  const retire = (entity: "work" | "composer", { ids, redirects }: { ids: string[]; redirects: Map<string, string> }, prev: PreviousIds, was: Map<string, { title: string; composer: string | null }>) => {
+    const live = new Set(ids);
+    const anchorsOf = new Map<string, string[]>();
+    for (const [a, id] of prev.anchors) anchorsOf.set(id, [...(anchorsOf.get(id) ?? []), a]);
+    const rows = new Map<string, RetiredRow>();
+    for (const r of previous.retired?.values() ?? []) if (r.entity === entity) rows.set(r.id, r);
+    for (const [id, w] of was) {
+      const candidates = [...new Set((anchorsOf.get(id) ?? []).flatMap((a) => uncertain.get(a) ?? []))];
+      const seeAlso = candidates.map((c) => workIdOf.get(c)).filter((x): x is string => !!x).sort();
+      rows.set(id, { entity, id, title: w.title, composer: w.composer, since: version, reason: candidates.length ? "uncertain" : "gone", see_also: JSON.stringify(seeAlso) });
+    }
+    const retired = new Set<string>();
+    for (const [id, r] of [...rows].sort(([a], [b]) => a.localeCompare(b))) {
+      if (live.has(id) || redirects.has(id)) continue;
+      insertRetired.run(r.entity, r.id, r.title, r.composer, r.since, r.reason, r.see_also);
+      retired.add(id);
+    }
+    // Ids merged into one now retired keep redirecting to it, whose page says what it was
+    for (const old of [...prev.redirects.keys()].sort()) {
+      let target = old;
+      for (let hops = 0; prev.redirects.has(target) && hops < 20; hops++) target = prev.redirects.get(target)!;
+      if (target !== old && retired.has(target) && !live.has(old) && !redirects.has(old)) insertRedirect.run(entity, old, target);
+    }
+  };
+  const gone = <T,>(was: Map<string, T>, ids: string[], redirects: Map<string, string>) => {
+    const live = new Set(ids);
+    return new Map([...was].filter(([id]) => !live.has(id) && !redirects.has(id)));
+  };
+  retire("work", workIds, previous.work, new Map([...gone(previous.works, workIds.ids, workIds.redirects)].map(([id, w]) => [id, { title: w.title, composer: w.composer ?? null }])));
+  retire("composer", composerIds, previous.composer, new Map([...gone(previous.composers, composerIds.ids, composerIds.redirects)].map(([id, c]) => [id, { title: c.name, composer: null }])));
 
   const iso = (t: number | undefined) => (t ? new Date(t).toISOString() : null);
   const meta: Meta = {
@@ -946,7 +1246,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
         items: gnd?.works.length ?? 0,
         matched: stats.matched.gnd,
         added: stats.added.gnd,
-        note: "musical works with instrumentation or a Wikidata link",
+        note: `musical works with instrumentation or a Wikidata link; ${stats.leftOut.gnd} left out as possibly works we have under other titles`,
       },
       rism: {
         fetchedAt: iso(rism?.fetchedAt),
@@ -1012,7 +1312,8 @@ function datasetStats(db: DatabaseSync): DatasetStats {
     core: one(`SELECT COUNT(*) AS n FROM works WHERE score >= ${CORE_SCORE}`).n,
     free: one("SELECT COUNT(*) AS n FROM works WHERE free = 1").n,
     arrangementOnly: one("SELECT COUNT(*) AS n FROM works w WHERE NOT EXISTS (SELECT 1 FROM scorings s WHERE s.work_id = w.id AND s.arrangement = 0)").n,
-    orchestrations: Object.fromEntries(all("SELECT source, COUNT(*) AS n FROM orchestrations GROUP BY source").map((r) => [r.source, r.n])),
+    orchestrations: Object.fromEntries(all("SELECT source, COUNT(*) AS n FROM orchestrations WHERE status != 'partial' GROUP BY source").map((r) => [r.source, r.n])),
+    orchestrationStatus: Object.fromEntries(all("SELECT status, COUNT(*) AS n FROM orchestrations GROUP BY status").map((r) => [r.status, r.n])),
     durations: one("SELECT COUNT(duration) AS n FROM works").n,
     movements: one("SELECT COUNT(movements) AS n FROM works").n,
     arrangements: (({ n, arrangers }) => ({ n, arrangers }))(one("SELECT COUNT(*) AS n, COUNT(DISTINCT arranger) AS arrangers FROM arrangements")),
@@ -1045,17 +1346,33 @@ export async function precomputeFacets(path: string, min = PRECOMPUTED_FACETS_MI
   return big.length;
 }
 
-/** Anchors and redirects of works and composers in a previous dataset. */
+/** Anchors and redirects of works and composers in a previous dataset, and what their ids showed. */
 export function readPrevious(path: string): Previous | null {
   if (!existsSync(path)) return null;
   const db = new DatabaseSync(path, { readOnly: true });
   try {
-    const hasLinks = db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'links'").get();
-    if (!hasLinks) return null; // a dataset from before persistent ids
-    const out: Previous = { work: { anchors: new Map(), redirects: new Map() }, composer: { anchors: new Map(), redirects: new Map() } };
-    for (const r of db.prepare("SELECT entity, provider, ref, entity_id FROM links").all() as Record<string, string>[]) {
-      out[r.entity as "work" | "composer"].anchors.set(`${r.provider}:${r.ref}`, r.entity_id!);
+    const has = (table: string) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE name = ?").get(table);
+    if (!has("links")) return null; // a dataset from before persistent ids
+    const out: Previous = { work: { anchors: new Map(), redirects: new Map() }, composer: { anchors: new Map(), redirects: new Map() }, works: new Map(), composers: new Map() };
+    if (has("anchors")) {
+      for (const r of db.prepare("SELECT entity, anchor, entity_id FROM anchors").all() as Record<string, string>[]) {
+        out[r.entity as "work" | "composer"].anchors.set(r.anchor!, r.entity_id!);
+      }
+    } else {
+      // Before the anchors table: records with a link, and composers without one by name and dates
+      for (const r of db.prepare("SELECT entity, provider, ref, entity_id FROM links").all() as Record<string, string>[]) {
+        out[r.entity as "work" | "composer"].anchors.set(`${r.provider}:${r.ref}`, r.entity_id!);
+      }
+      const unlinked = "SELECT id, name, born FROM composers c WHERE NOT EXISTS (SELECT 1 FROM links l WHERE l.entity = 'composer' AND l.entity_id = c.id)";
+      for (const r of db.prepare(unlinked).all() as Record<string, any>[]) {
+        const a = nameAnchor(r.name, r.born);
+        if (a) out.composer.anchors.set(a, r.id);
+      }
     }
+    for (const r of db.prepare("SELECT w.id, w.title, w.year, c.name AS composer FROM works w LEFT JOIN composers c ON c.id = w.composer_id").all() as Record<string, any>[])
+      out.works.set(r.id, { title: r.title, year: r.year, composer: r.composer });
+    if (has("retired")) out.retired = new Map((db.prepare("SELECT * FROM retired").all() as any[]).map((r) => [`${r.entity}|${r.id}`, { ...r } as RetiredRow]));
+    for (const r of db.prepare("SELECT id, name FROM composers").all() as Record<string, any>[]) out.composers.set(r.id, { name: r.name });
     for (const r of db.prepare("SELECT entity, old_id, new_id FROM redirects").all() as Record<string, string>[]) {
       out[r.entity as "work" | "composer"].redirects.set(r.old_id!, r.new_id!);
     }

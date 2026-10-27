@@ -3,6 +3,7 @@
 // 45–75 days (staggered per work) and accumulate across runs.
 
 import { cached, fetchJson, jitteredMaxAge, progress, readStage, writeStage } from "../http.ts";
+import type { StageReport } from "../stages.ts";
 import type { WikidataStage } from "./wikidata.ts";
 
 export interface MusicBrainzStage {
@@ -10,7 +11,7 @@ export interface MusicBrainzStage {
   recordings: Record<string, { count: number; at: number }>;
 }
 
-export async function crawlMusicBrainz(opts: { budget: number }): Promise<void> {
+export async function crawlMusicBrainz(opts: { budget: number }): Promise<StageReport> {
   const wd = await readStage<WikidataStage>("wikidata");
   const stage = (await readStage<MusicBrainzStage>("musicbrainz")) ?? { fetchedAt: Date.now(), recordings: {} };
   const works = Object.values(wd?.works ?? {})
@@ -44,4 +45,5 @@ export async function crawlMusicBrainz(opts: { budget: number }): Promise<void> 
   }
   stage.fetchedAt = Date.now();
   await writeStage("musicbrainz", stage);
+  return { failed, of: batch.length };
 }

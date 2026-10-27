@@ -2,7 +2,7 @@
 // for links between the app's pages.
 
 import { useEffect, useState } from "react";
-import type { ComposerDetail, LineupsIndex, Meta, SearchResults, WorkDetail, WorksPage } from "../shared/data";
+import type { ComposerDetail, Gone, LineupsIndex, Meta, SearchResults, WorkDetail, WorksPage } from "../shared/data";
 
 const cache = new Map<string, Promise<unknown>>();
 
@@ -24,8 +24,8 @@ export function api<T>(path: string): Promise<T> {
     p = fetch(versioned(path), { signal: AbortSignal.timeout(TIMEOUT_MS) }).then(
       async (res) => {
         if (!res.ok) {
-          const body = (await res.json().catch(() => null)) as { error?: string } | null;
-          throw new ApiError(res.status, `The server said: ${body?.error ?? `${res.status} ${res.statusText}`}.`);
+          const body = (await res.json().catch(() => null)) as { error?: string; gone?: Gone } | null;
+          throw new ApiError(res.status, `The server said: ${body?.error ?? `${res.status} ${res.statusText}`}.`, body?.gone);
         }
         return res.json() as Promise<T>;
       },
@@ -42,9 +42,12 @@ export function api<T>(path: string): Promise<T> {
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** For 410: what the work or composer was */
+  gone?: Gone;
+  constructor(status: number, message: string, gone?: Gone) {
     super(message);
     this.status = status;
+    this.gone = gone;
   }
 }
 
@@ -57,6 +60,12 @@ function takeInitial(path: string) {
     const initial = JSON.parse(el.textContent ?? "null") as { type: string; id: string; data: unknown } | null;
     if (initial?.type === "work" && path === `/api/works/${initial.id}`) cache.set(path, Promise.resolve(initial.data));
     if (initial?.type === "composer" && path === `/api/composers/${initial.id}`) cache.set(path, Promise.resolve(initial.data));
+    // A retired id: the same error the API would give
+    if (initial?.type === "gone" && (path === `/api/works/${initial.id}` || path === `/api/composers/${initial.id}`)) {
+      const failed = Promise.reject(new ApiError(410, "The server said: No longer listed.", initial.data as Gone));
+      failed.catch(() => {});
+      cache.set(path, failed);
+    }
   } catch {
     // Not worth failing over: the page fetches the data instead.
   }

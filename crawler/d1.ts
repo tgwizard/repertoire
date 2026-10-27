@@ -4,6 +4,9 @@
 import { DatabaseSync } from "node:sqlite";
 import type { Db, Stmt } from "../worker/queries.ts";
 
+/** Bound parameters D1 allows in one query */
+export const D1_MAX_PARAMETERS = 100;
+
 class SqliteStmt implements Stmt {
   db: DatabaseSync;
   sql: string;
@@ -17,6 +20,8 @@ class SqliteStmt implements Stmt {
     return new SqliteStmt(this.db, this.sql, values);
   }
   run<T>(): T[] {
+    // D1's limit, which SQLite's own (32766) would let through unnoticed
+    if (this.values.length > D1_MAX_PARAMETERS) throw new Error(`D1_ERROR: too many SQL variables (${this.values.length}; D1 allows ${D1_MAX_PARAMETERS})`);
     return this.db.prepare(this.sql).all(...(this.values as never[])) as T[];
   }
   async all<T>(): Promise<{ results: T[] }> {

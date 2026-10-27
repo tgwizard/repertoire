@@ -12,7 +12,7 @@ const CATALOGUES: [string, RegExp][] = [
   ["hob", /\bHob\.?\s*([IVXL]+[a-z]?\s*:\s*[\dA-Za-z]+)/g],
   ["hwv", /\bHWV\.?\s*(\d+[a-z]?)/gi],
   ["rv", /\bRV\.?\s*(\d+[a-z]?)/g],
-  ["twv", /\bTWV\.?\s*(\d+\s*:\s*[\dA-Za-z]+)/gi],
+  ["twv", /\bTWV\.?\s*(\d+\s*[:,]\s*[\dA-Za-z]+)/gi], // "TWV 1:448", GND's "TWV 1,448"
   ["woo", /\bWoO\.?\s*(\d+[a-z]?)/gi],
   ["sz", /\bSz\.?\s*(\d+[a-z]?)/g],
   ["bb", /\bBB\.?\s*(\d+[a-z]?)/g],
@@ -36,7 +36,7 @@ const CATALOGUES: [string, RegExp][] = [
   ["mh", /\bMH\.?\s*(\d{1,3}[a-z]?)\b/g], // Michael Haydn (Perger: MH 461)
 ];
 
-const OPUS = /\bOp(?:us)?\.?\s*(?:posth\.?\s*)?(\d+[a-z]?)(?:\s*,?\s*(?:No|Nr|N°|n°)\.?\s*(\d+[a-z]?))?/gi;
+const OPUS = /\b(?:Op(?:us)?\.?|Werk)\s*(?:posth\.?\s*)?(\d+[a-z]?)(?:\s*,?\s*(?:No|Nr|N°|n°)\.?\s*(\d+[a-z]?))?/gi;
 
 /**
  * Catalogue keys in a title: "String Quartet No.1, Op.18 No.1" → {"op:18", "op:18/1"};
@@ -44,7 +44,7 @@ const OPUS = /\bOp(?:us)?\.?\s*(?:posth\.?\s*)?(\d+[a-z]?)(?:\s*,?\s*(?:No|Nr|N�
  */
 // Matching compares each record against all of a composer's works, so the parsing of
 // titles is memoized (results are never mutated).
-function memo<T>(fn: (title: string) => T): (title: string) => T {
+export function memo<T>(fn: (title: string) => T): (title: string) => T {
   const cache = new Map<string, T>();
   return (title) => {
     let v = cache.get(title);
@@ -70,7 +70,8 @@ function catalogueKeysOf(title: string): Set<string> {
   }
   for (const [prefix, re] of CATALOGUES) {
     for (const m of title.matchAll(re)) {
-      const value = m[1]!.toLowerCase().replace(/\s+/g, "");
+      // "K 32" and "K032" are one number
+      const value = m[1]!.toLowerCase().replace(/\s+/g, "").replace(",", ":").replace(/(^|:)0+(?=\d)/g, "$1");
       keys.add(`${prefix}:${value}`);
       // Ranges on collection pages: "G.214-215", "Hob.III:19-24".
       const range = /^\s*[-–]\s*(\d+)\b/.exec(title.slice(m.index! + m[0].length));
@@ -108,6 +109,17 @@ export interface Candidate {
   title: string;
 }
 
+/** Whether two titles name different numbers in a catalogue they both use (K. 1, K. 2) */
+function conflicting(keys: Set<string>, theirs: Set<string>): boolean {
+  for (const system of systems(keys)) {
+    if (system === "op") continue; // opus numbers are reused; sub-numbers are compared apart
+    const mine = [...keys].filter((k) => k.startsWith(`${system}:`));
+    const other = [...theirs].filter((k) => k.startsWith(`${system}:`));
+    if (other.length && !mine.some((k) => theirs.has(k))) return true;
+  }
+  return false;
+}
+
 const systems = (keys: Set<string>) => new Set([...keys].map((k) => k.slice(0, k.indexOf(":"))));
 
 /**
@@ -120,9 +132,12 @@ const systems = (keys: Set<string>) => new Set([...keys].map((k) => k.slice(0, k
  *   numbers ("String Quartet No. 1" ≈ "String Quartet No.1, Op.50"), or if the two use
  *   different catalogue systems (Bartók BB vs Sz) and the title includes a number.
  * - Titles naming different keys are different works, unless they share a number that
- *   identifies one work (a source with the wrong key).
+ *   identifies one work (a source with the wrong key); so are titles with different
+ *   numbers in one catalogue (K. 1 and K. 2), whatever else they share.
+ * - `fits(candidate, byNumber)` can refuse a candidate, e.g. one matched by title alone
+ *   whose line-up or year disagree.
  */
-export function matchWork<C extends Candidate>(title: string, candidates: C[]): C | null {
+export function matchWork<C extends Candidate>(title: string, candidates: C[], fits?: (c: C, byNumber: boolean) => boolean): C | null {
   const keys = catalogueKeys(title);
   const bare = bareTitle(title);
   const key = musicalKey(title);
@@ -135,6 +150,7 @@ export function matchWork<C extends Candidate>(title: string, candidates: C[]): 
     const ckey = key && musicalKey(c.title);
     const unique = [...keys].some((k) => ck.has(k) && (!k.startsWith("op:") || k.includes("/")));
     if (key && ckey && key !== ckey && !unique) continue;
+    if (!unique && conflicting(keys, ck)) continue;
     const sameBare = bare.length > 3 && bare === bareTitle(c.title);
     // 4: a number that identifies one work (K. 172, G.215, Op.18 No.1); opus numbers are
     // reused, so a shared bare opus is weaker: 3, or 2 if only one side names a No.
@@ -153,6 +169,7 @@ export function matchWork<C extends Candidate>(title: string, candidates: C[]): 
       const otherSystem = ![...systems(keys)].some((s) => systems(ck).has(s)) && /\d/.test(bare);
       if (oneSided || otherSystem) score = 1;
     }
+    if (score && fits && !fits(c, catalogue > 0)) continue;
     if (score > bestScore) [best, bestScore] = [[c], score];
     else if (score === bestScore && score > 0) best.push(c);
   }

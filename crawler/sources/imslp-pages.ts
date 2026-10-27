@@ -4,6 +4,7 @@
 // parser doesn't need a recrawl.
 
 import { fetchJson, jitteredMaxAge, progress, readStage, writeStage } from "../http.ts";
+import type { StageReport } from "../stages.ts";
 import type { ImslpStage } from "./imslp.ts";
 
 const API = "https://imslp.org/api.php";
@@ -136,7 +137,7 @@ export function extractPage(text: string, rev: number, at: number): ImslpPage {
  * Pages are re-read after 60–120 days (staggered per page), and sooner when they were
  * read before the stage kept something they have (arrangements: pages in an "(arr)" category).
  */
-export async function crawlImslpPages(): Promise<void> {
+export async function crawlImslpPages(): Promise<StageReport> {
   const imslp = await readStage<ImslpStage>("imslp");
   if (!imslp) throw new Error("run the imslp stage first");
   const stage = (await readStage<ImslpPagesStage>("imslp-pages")) ?? { pages: {} };
@@ -180,6 +181,7 @@ export async function crawlImslpPages(): Promise<void> {
     `  ${n.length} pages: ${n.filter((p) => p.parts).length} with parts, ${n.filter((p) => p.duration).length} with a duration, ` +
       `${n.filter((p) => p.movements).length} with movements, ${n.filter((p) => p.arrangements).length} with arrangements`,
   );
+  return { failed, of: Math.ceil(todo.length / BATCH) };
 }
 
 /**

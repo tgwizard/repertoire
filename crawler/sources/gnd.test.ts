@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { gndKey, gndLineup, gndMatchTitle, gndTitle, parseWork, type GndWork } from "./gnd.ts";
+import { gndAliases, gndKey, gndLineup, gndMatchTitle, gndPart, gndTitle, gndYear, parseWork, type GndWork } from "./gnd.ts";
 
 test("GND instrumentation becomes a line-up; voice types are 'voice'; vague names give none", () => {
   assert.deepEqual(gndLineup([{ name: "Violine", count: 2 }, { name: "Viola", count: 1 }, { name: "Violoncello", count: 1 }]), { violin: 2, viola: 1, cello: 1 });
@@ -44,4 +44,33 @@ test("a GND record: its composer, not a related work's", () => {
   assert.equal(w.composer, "42");
   assert.deepEqual(w.media, [{ name: "Violine", count: 1 }, { name: "Klavier", count: 1 }]);
   assert.equal(w.wikidata, "Q123");
+});
+
+test("parts of works: the work and the part, numbers in a set told apart from movements", () => {
+  const part = (name: string) => gndPart({ name } as never);
+  // An aria, a number in a set: pieces of their own too; a movement isn't
+  assert.deepEqual(part("Lakmé. Où va la jeune Indoue"), { parent: "Lakmé", part: "Où va la jeune Indoue", numbered: false, standalone: true });
+  assert.deepEqual(part("Sonata, Violoncello. No. 1"), { parent: "Sonata, Violoncello", part: "No. 1", numbered: true, standalone: true });
+  assert.deepEqual(part("Etüden, Org (2005). Etüde, No. 5"), { parent: "Etüden, Org (2005)", part: "Etüde, No. 5", numbered: true, standalone: true });
+  assert.deepEqual(part("Manfred. Ouvertüre"), { parent: "Manfred", part: "Ouvertüre", numbered: false, standalone: false });
+  assert.equal(part("Die kleine Passion. Teil 6")?.standalone, false);
+  assert.equal(part("Sonaten, op. 11. Nr. 2 (E-Dur)")?.numbered, true);
+  assert.equal(part("Sonate, S C 740 (a-Moll). Presto")?.standalone, false);
+  // Its other names can say it's a movement ("1. Satz")
+  assert.equal(gndPart({ name: "Trios, Violine, Violoncello, Klavier. Modéré", variants: ["Klaviertrio a-Moll. 1. Satz"] } as never)?.standalone, false);
+  assert.equal(part("Konzerte, Cembalo obbligato, Violine (2), Viola, Basso continuo, HH.32 n. 3 (D-Dur)"), null);
+  // Abbreviations aren't the separator
+  assert.equal(part("Sinfonien, Singst. 1 2, Nr. 8"), null);
+  assert.equal(part("Quartette, op. 18, Nr. 1"), null);
+  assert.equal(part('Choräle aus der Sammlung "Joh. Seb. Bachs vierstimmige Choralgesänge". Der Tag')?.part, "Der Tag");
+});
+
+test("years and other names", () => {
+  const w = (name: string, year: number | null, variants: string[] = []) => ({ name, year, variants }) as never;
+  assert.equal(gndYear(w("Konzerte, Horn, Orchester (2003)", null)), 2003);
+  assert.equal(gndYear(w("Konzerte, Tuba, Orchester", 1985)), 1985);
+  assert.equal(gndYear(w("Lieder", null, ["Lieder (1910)"])), null); // a variant's year may be an edition's
+  assert.deepEqual(gndAliases(w("Studien, Querflöte, Klarinette, Fagott", 1958, ["Tre studi per flauto, clarinetto e fagotto", "Studien, Fl, Klar, Fg (1958)", "Sonaten op. 11, 3"])), [
+    "Tre studi per flauto, clarinetto e fagotto",
+  ]);
 });

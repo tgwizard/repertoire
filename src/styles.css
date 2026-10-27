@@ -159,6 +159,19 @@ button:disabled {
   border-color: var(--accent);
 }
 
+/* A work or composer no longer listed: a paragraph or two and links, not one line */
+.notice.gone {
+  display: block;
+  color: var(--ink);
+}
+.notice.gone p {
+  margin: 0 0 8px;
+}
+.notice.gone ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
 .load-error {
   justify-content: space-between;
   flex-wrap: wrap;
@@ -1112,6 +1125,12 @@ code {
   font: 0.8rem/1.4 ui-monospace, "SF Mono", Menlo, monospace;
   color: var(--muted);
   margin-right: 6px;
+}
+
+/* From one source only (or partial, on a work's page): said, not shouted */
+.orchestration-tag.single {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
 }
 
 .orchestration p {

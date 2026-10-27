@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { bareTitle, musicalKey } from "../../crawler/match.ts";
 import { decodeEnsemble, ensembleKey, fitsIn, parseEnsembleKey } from "../../src/lib/instrumentation.ts";
-import { orchestraColumns, parseOrchestration } from "../../src/lib/orchestration.ts";
+import { formatOrchestration, parseOrchestration } from "../../src/lib/orchestration.ts";
 import type { ComposerDetail, LineupsIndex, Meta, SearchResults, WorkDetail, WorkSummary, WorksPage } from "../../src/shared/data.ts";
 import { api, request, where } from "../client.ts";
 
@@ -132,28 +132,42 @@ test("an orchestra's smaller groups include chamber and string orchestra works",
 
 // Section players (auxiliaries in their section): fl ob cl bn, hn tpt tbn tba; then
 // timpani and strings. As the scores have them.
-const SCORINGS: [query: string, sections: string, timp: boolean][] = [
-  ["beethoven symphony 5 op 67", "3.2.2.3 2.2.3.0", true], // piccolo and contrabassoon in the finale
-  ["beethoven symphony 7 op 92", "2.2.2.2 2.2.0.0", true],
-  ["brahms symphony 1 op 68", "2.2.2.3 4.2.3.0", true],
-  ["haydn symphony 104", "2.2.2.2 2.2.0.0", true],
-  ["schubert symphony 8 d 759", "2.2.2.2 2.2.3.0", true],
-  ["tchaikovsky symphony 5 op 64", "3.2.2.2 4.2.3.1", true],
-  ["mendelssohn hebrides op 26", "2.2.2.2 2.2.0.0", true],
+// What the scores call for (percussion players aside: editions count them differently)
+const SCORINGS: [query: string, scoring: string][] = [
+  ["beethoven symphony 5 op 67", "2+picc.2.2.2+cbn – 2.2.3.0 – timp – str"], // piccolo and contrabassoon in the finale
+  ["beethoven symphony 7 op 92", "2.2.2.2 – 2.2.0.0 – timp – str"],
+  ["brahms symphony 1 op 68", "2.2.2.2+cbn – 4.2.3.0 – timp – str"],
+  ["haydn symphony 104", "2.2.2.2 – 2.2.0.0 – timp – str"],
+  ["schubert symphony 8 d 759", "2.2.2.2 – 2.2.3.0 – timp – str"],
+  ["tchaikovsky symphony 5 op 64", "3.2.2.2 – 4.2.3.1 – timp – str"],
+  ["mendelssohn hebrides op 26", "2.2.2.2 – 2.2.0.0 – timp – str"],
+];
+// Instruments beyond the usual ones (the review found them missing): there, or the scoring isn't relied on
+const SPECIAL: [query: string, instrument: string][] = [
+  ["saint saens symphony 3 op 78", "org"],
+  ["holst planets op 32", "bfl"],
+  ["strauss alpensinfonie op 64", "hck"],
 ];
 
 test("orchestral works have the scoring their scores have", async () => {
   const wrong: string[] = [];
-  for (const [q, sections, timp] of SCORINGS) {
+  const scoring = async (q: string) => {
     const [hit] = (await search(q, 1)).works;
-    const o = hit && (await api<WorkDetail>(`/api/works/${hit.id}`)).orchestration;
+    return { hit, o: hit && (await api<WorkDetail>(`/api/works/${hit.id}`)).orchestration };
+  };
+  for (const [q, want] of SCORINGS) {
+    const { hit, o } = await scoring(q);
     if (!o) {
       wrong.push(`${q}: ${hit ? `no scoring for ${hit.title}` : "not found"}`);
       continue;
     }
-    const c = orchestraColumns(o.instruments);
-    const got = `${c.fl}.${c.ob}.${c.cl}.${c.bn} ${c.hn}.${c.tpt}.${c.tbn}.${c.tba}`;
-    if (got !== sections || !!c.timp !== timp || !c.str) wrong.push(`${q}: ${o.scoring} (${o.source}), expected ${sections}${timp ? " timp" : ""} str`);
+    const { perc, ...rest } = o.instruments;
+    const got = formatOrchestration(Object.fromEntries(Object.entries(rest).filter(([k]) => !k.includes("/"))));
+    if (got !== want || o.status === "partial") wrong.push(`${q}: ${o.scoring} (${o.status}, ${o.basis}), expected ${want}`);
+  }
+  for (const [q, instrument] of SPECIAL) {
+    const { hit, o } = await scoring(q);
+    if (o && o.status !== "partial" && !o.instruments[instrument]) wrong.push(`${q} (${hit?.title}): ${o.scoring} (${o.status}) without ${instrument}`);
   }
   assert.deepEqual(wrong, []);
 });
@@ -167,8 +181,14 @@ test("an orchestra finds what it can play, and not what it can't", async () => {
   assert.ok(page.total > 500 && (page.unscored ?? 0) > 0, `${page.total} works fit, ${page.unscored} unscored`);
   const exact = await api<WorksPage>(`/api/works?lineup=orchestra&orchestra=${classical}&fit=exact&limit=200`);
   assert.ok(exact.total > 50 && exact.total < page.total, `${exact.total} exactly so`);
-  const want = orchestraColumns(parseOrchestration("2.2.2.2 2.2.0.0 timp str")!);
-  for (const w of exact.works) assert.deepEqual(orchestraColumns(parseOrchestration(w.orchestration!)!), want, `${w.title}: ${w.orchestration}`);
+  for (const w of exact.works) {
+    const { perc, ...rest } = parseOrchestration(w.orchestration!)!;
+    assert.equal(formatOrchestration(rest), "2.2.2.2 – 2.2.0.0 – timp – str", `${w.title}: ${w.orchestration}`);
+  }
+  // A band's timpani sheet isn't its scoring: The Thunderer fits no orchestra of timpani and percussion
+  const timpani = encodeURIComponent("0.0.0.0 0.0.0.0 timp perc");
+  const thunder = await api<WorksPage>(`/api/works?lineup=${encodeURIComponent("orchestra without strings")}&orchestra=${timpani}&q=thunderer`);
+  assert.deepEqual(thunder.works.map((w) => w.title), []);
 });
 
 test("work pages: links, line-ups and sources for well-known works", async () => {

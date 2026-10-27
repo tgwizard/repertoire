@@ -4,8 +4,10 @@
 // - an on-disk cache, so an interrupted crawl resumes where it stopped
 
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { mkdir, open, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { createGunzip } from "node:zlib";
 
 export const CACHE_DIR = join(import.meta.dirname, "..", ".cache");
 export const USER_AGENT =
@@ -135,6 +137,14 @@ export function jitteredMaxAge(key: string, minDays: number, maxDays: number): n
   return (minDays + (n % (maxDays - minDays + 1))) * DAY;
 }
 
+let staleUses = 0;
+/** How many times stale cache stood in for a failed fetch since the last call */
+export function takeStaleUses(): number {
+  const n = staleUses;
+  staleUses = 0;
+  return n;
+}
+
 /** Cache files used by this run, for collectGarbage. */
 const touched = new Set<string>();
 
@@ -157,6 +167,7 @@ export async function cached<T>(key: string, maxAgeMs: number, produce: () => Pr
     return { value, fetchedAt: entry.fetchedAt, fromCache: false };
   } catch (e) {
     if (hit && hit.key === key) {
+      staleUses++;
       console.warn(`  ⚠ using stale cache for ${key.slice(0, 100)}: ${(e as Error).message}`);
       return { value: hit.value, fetchedAt: hit.fetchedAt, fromCache: true };
     }
@@ -200,15 +211,32 @@ export const stagePath = (name: string) => join(CACHE_DIR, "stages", `${name}.js
  * plus a combining mark, which would match nothing that's spelled the usual way.
  */
 export async function readStage<T>(name: string): Promise<T | null> {
+  let text: string;
   try {
-    return JSON.parse((await readFile(stagePath(name), "utf8")).normalize("NFC")) as T;
-  } catch {
-    return null;
+    text = await readFile(stagePath(name), "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null; // not crawled yet
+    throw e;
+  }
+  // A stage that's there but unreadable is broken, not absent: building without it
+  // would quietly drop a source.
+  try {
+    return JSON.parse(text.normalize("NFC")) as T;
+  } catch (e) {
+    throw new Error(`Stage ${name} is malformed (${stagePath(name)}): ${(e as Error).message}`);
   }
 }
 export const writeStage = (name: string, value: unknown) => writeJsonAtomic(stagePath(name), value);
 
 export const DAY = 24 * 3600 * 1000;
+
+/**
+ * A gzipped file's text as it streams. Decoded by the stream, not chunk by chunk: a
+ * character's bytes can straddle two chunks, and decoding each half alone garbles it.
+ */
+export function gzipText(path: string, chunkSize?: number): AsyncIterable<string> {
+  return createReadStream(path).pipe(createGunzip(chunkSize ? { chunkSize } : {})).setEncoding("utf8");
+}
 
 /** Prints progress at most every few seconds, with an ETA from the last couple of minutes' rate. */
 export function progress(label: string, total: number) {

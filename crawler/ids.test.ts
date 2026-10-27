@@ -37,6 +37,18 @@ test("a split keeps the id with the stronger anchor; the other part gets a new o
   assert.equal(redirects.size, 0);
 });
 
+test("a split between equally strong anchors keeps the id with the part most like it was", () => {
+  // One work made of two GND records; split, the record whose title and year it showed keeps it
+  const prev = previous([["gnd:1", "gnd:2"]], ["aaaaaaaa"]);
+  const was = { title: "Concerto", year: 1985 };
+  const parts = [{ title: "Concerto", year: 2003 }, { title: "Concerto", year: 1985 }];
+  const like = (e: number) => (parts[e]!.title === was.title ? 2 : 0) + (parts[e]!.year === was.year ? 1 : 0);
+  const { ids, redirects } = assignIds([["gnd:1"], ["gnd:2"]], prev, ["gnd"], like);
+  assert.equal(ids[1], "aaaaaaaa");
+  assert.notEqual(ids[0], "aaaaaaaa");
+  assert.equal(redirects.size, 0); // the other part never had a page of its own
+});
+
 test("never reuses an old id for something else, and keeps redirect chains short", () => {
   // aaaaaaaa was merged into bbbbbbbb; bbbbbbbb now merges into cccccccc.
   const prev = previous([["imslp:2"], ["imslp:3"]], ["bbbbbbbb", "cccccccc"], [["aaaaaaaa", "bbbbbbbb"]]);

@@ -91,6 +91,7 @@ export function AboutPage() {
                       {n(Object.values(s.orchestrations).reduce((a, b) => a + b, 0))}{" "}
                       <span className="muted small">
                         {(Object.entries(s.orchestrations) as [SourceId, number][]).map(([src, k]) => `${n(k)} from ${SOURCES[src].name}`).join(", ")}
+                        {s.orchestrationStatus?.confirmed !== undefined && `; ${n(s.orchestrationStatus.confirmed)} confirmed by two sources`}
                       </span>
                     </dd>
                   </div>

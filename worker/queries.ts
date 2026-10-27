@@ -2,7 +2,7 @@
 // we use, so the tests can run them on the built SQLite file with node:sqlite.
 
 import { describe, fitsIn, parseEnsembleKey, playerCount } from "../src/lib/instrumentation.ts";
-import { orchestraColumns, type Orchestration } from "../src/lib/orchestration.ts";
+import { column, orchestraConditions, type Orchestration } from "../src/lib/orchestration.ts";
 import {
   CORE_SCORE,
   ERAS,
@@ -10,6 +10,7 @@ import {
   scoreParts,
   type ComposerDetail,
   type Era,
+  type Gone,
   type Facets,
   type Link,
   type LineupsIndex,
@@ -25,7 +26,7 @@ import {
   type WorkSummary,
   type WorksPage,
 } from "../src/shared/data.ts";
-import { normalize } from "../src/shared/text.ts";
+import { searchText } from "../src/shared/text.ts";
 
 export interface Stmt {
   bind(...values: unknown[]): Stmt;
@@ -118,12 +119,13 @@ export interface WorkQuery {
 
 /** An FTS5 query from what someone typed: every word must match, words as prefixes. */
 export function ftsQuery(input: string): string | null {
-  const words = normalize(input).split(" ").filter(Boolean).slice(0, 12);
+  const words = searchText(input).split(" ").filter(Boolean).slice(0, 12);
   if (!words.length) return null;
   return words.map((w) => (/^\d+$/.test(w) || w.length < 2 ? `"${w}"` : `"${w}"*`)).join(" ");
 }
 
-const SUMMARY = `w.id, w.title, w.year, w.era, w.score, s.lineup, s.players, s.arrangement, w.duration, w.movements, o.scoring AS orchestration,
+const SUMMARY = `w.id, w.title, w.year, w.era, w.score, s.lineup, s.players, s.arrangement, w.duration, w.movements,
+  CASE WHEN o.status != 'partial' THEN o.scoring END AS orchestration, o.status AS orchestration_status,
   c.id AS cid, c.name AS cname, c.born AS cborn, c.died AS cdied,
   (SELECT url FROM links WHERE entity = 'work' AND entity_id = w.id AND kind = 'score' ORDER BY provider != 'imslp' LIMIT 1) AS score_url`;
 // The orchestrations join only where it's used (the listed page, an orchestra's filter):
@@ -163,7 +165,7 @@ function arrangedBy(json: string | null | undefined, rowLineup: string, searched
   const out: ArrangedBy[] = [];
   const seen = new Set<string>();
   for (const [arranger, excerpt, lineup] of rows) {
-    if (searched && !(arranger && normalize(arranger).split(" ").some((t) => searched.some((w) => t.startsWith(w))))) continue;
+    if (searched && !(arranger && searchText(arranger).split(" ").some((t) => searched.some((w) => t.startsWith(w))))) continue;
     const a: ArrangedBy = { arranger, excerpt, ...(lineup && lineup !== rowLineup && { lineup: lineupDescription(lineup) }) };
     const key = JSON.stringify(a);
     if (!seen.has(key)) seen.add(key), out.push(a);
@@ -187,6 +189,7 @@ function toSummary(r: Row, searched?: string[]): WorkSummary {
     duration: r.duration,
     movements: r.movements,
     orchestration: r.orchestration,
+    ...(r.orchestration && { orchestrationStatus: r.orchestration_status }),
     ...(arranged && { arrangedBy: arranged }),
   };
 }
@@ -206,6 +209,38 @@ const ORDER: Record<WorkSort, [SortOrder, (d: string) => string]> = {
 
 /** Rows listed for a line-up with an orchestra in it ("orchestra*2", "voices with orchestra" too) */
 const ORCHESTRAL = "s.lineup LIKE '%orchestra%'";
+/** No scoring to go on: none, or one that can't be relied on */
+const UNSCORED = "(o.work_id IS NULL OR o.status = 'partial')";
+
+/**
+ * Whether the row's work's scoring fits an orchestra (or is exactly it), as SQL on the
+ * orchestrations table. The orchestra's numbers are written in, not bound: there are dozens,
+ * the facets repeat the condition, and D1 allows 100 bound parameters a query.
+ */
+function orchestraFits(ours: Orchestration, exact: boolean): string {
+  const c = (k: string) => `o.${column(k)}`;
+  const n = (v: number) => {
+    if (!Number.isInteger(v) || v < 0 || v > 1000) throw new Error(`Not a number of players: ${v}`);
+    return String(v);
+  };
+  const doubled = (main: string, aux: string, ours: number) =>
+    `(MAX(0, ${c(`${main}/${aux}`)} - MAX(0, ${n(ours)} - ${c(aux)})) + MAX(0, ${c(aux)} - ${n(ours)}))`;
+  const sql = orchestraConditions(ours, exact).map((k) => {
+    switch (k.kind) {
+      case "exact":
+        return `${c(k.key)} = ${n(k.value)}`;
+      case "players":
+        return `${c(k.key)} <= ${n(k.max)}`;
+      case "section":
+        return `${c(k.main)}${k.auxes.map((a) => ` + MAX(0, ${c(a.aux)} - ${n(a.ours)})`).join("")} <= ${n(k.max)}`;
+      case "doubling":
+        return `${doubled(k.main, k.aux, k.ours)} <= ${n(k.max)}`;
+      case "doublers":
+        return `${k.auxes.map((a) => doubled(k.main, a.aux, a.ours)).join(" + ")} <= ${n(k.max)}`;
+    }
+  });
+  return `NOT ${UNSCORED} AND ${sql.join(" AND ")}`;
+}
 
 /** Line-ups this big have their unfiltered facets precomputed by the build (lineup_facets;
  * the dataset's meta says which threshold it used) */
@@ -216,7 +251,8 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
   const offset = Math.min(Math.max(q.offset ?? 0, 0), 100_000);
   const fts = q.q ? ftsQuery(q.q) : null;
   if (q.q && !fts) return { total: 0, offset, works: [], facets: null };
-  const sort = q.sort && q.sort in ORDER && (q.sort !== "relevance" || fts) ? q.sort : "rank";
+  // Relevance needs a search; hasOwn, as "constructor" is in every object
+  const sort = q.sort && Object.hasOwn(ORDER, q.sort) && (q.sort !== "relevance" || fts) ? q.sort : "rank";
   const [natural, orderBy] = ORDER[sort];
   const dir = (q.order ?? natural) === "desc" ? "DESC" : "ASC";
 
@@ -291,12 +327,10 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
   // orchestra works need strings; anything else (a soloist's part) is fine as it is.
   if (q.orchestra) {
     const exact = q.fit === "exact";
-    const columns = Object.entries(orchestraColumns(q.orchestra));
-    const fits = `o.work_id IS NOT NULL AND ${columns.map(([c]) => `o.${c} ${exact ? "=" : "<="} ?`).join(" AND ")}`;
     filters.push({
       key: "orchestra",
-      sql: `(CASE WHEN ${ORCHESTRAL} THEN ${fits} WHEN s.lineup = 'strings' THEN ? ELSE ? END)`,
-      args: [...columns.map(([, n]) => n), q.orchestra.str && !exact ? 1 : 0, exact ? 0 : 1],
+      sql: `(CASE WHEN ${ORCHESTRAL} THEN ${orchestraFits(q.orchestra, exact)} WHEN s.lineup = 'strings' THEN ${q.orchestra.str && !exact ? 1 : 0} ELSE ${exact ? 0 : 1} END)`,
+      args: [],
     });
   }
   if (q.show === "core") filters.push({ key: "show", sql: `w.score >= ${CORE_SCORE}`, args: [] });
@@ -329,12 +363,36 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
     stmts.push(db.prepare("SELECT total, facets FROM lineup_facets WHERE lineup = ? AND arrangements = ?").bind(q.lineup, q.arrangements ? 1 : 0));
   } else if (q.facets) {
     // Arrangements are counted whether or not they're listed, so the facet's base has them
-    // all, and "originals only" is one more condition to pass
+    // all, and "originals only" is one more condition to pass.
     const [facetBase, facetBaseArgs] = q.arrangements ? [base, baseArgs] : [base.slice(0, -1), baseArgs.slice(0, baseArgs.length - original.args.length)];
-    const flags = [...filters.map((f) => `MAX(${f.sql}) AS f_${f.key}`), `MAX(${original.sql}) AS original`];
-    if (q.orchestra) flags.push(`MAX(${ORCHESTRAL} AND o.work_id IS NULL) AS unscored`);
-    const pass = (except?: Filter["key"] | "arrangements") =>
-      [...filters.filter((f) => f.key !== except).map((f) => `f_${f.key}`), ...(!q.arrangements && except !== "arrangements" ? ["original"] : [])].join(" AND ") || "1";
+    // Some conditions are on a work's row for a line-up (an arrangement or not, an
+    // orchestra's fit, an arranger's name), the rest on the work. A work passes when one
+    // of its rows passes all the row conditions together: one row an original and another
+    // found by its arranger isn't a match. So each flag is a conjunction, per row, of the
+    // row conditions a count needs (all of them, or all but its own), before grouping.
+    type Cond = { key: string; sql: string; args: unknown[] };
+    const onRow = (f: Filter) => f.key === "orchestra" || f.key === "q";
+    const rowConds: Cond[] = filters.filter(onRow);
+    const originalCond: Cond = { key: "original", sql: original.sql, args: original.args };
+    const listed = q.arrangements ? rowConds : [...rowConds, originalCond];
+    const flagSql: string[] = [];
+    const flagArgs: unknown[] = [];
+    const flag = (name: string, conds: Cond[]) => {
+      flagSql.push(`MAX(${conds.map((c) => `(${c.sql})`).join(" AND ") || "1"}) AS ${name}`);
+      for (const c of conds) flagArgs.push(...c.args);
+    };
+    for (const f of filters.filter((f) => !onRow(f))) flag(`f_${f.key}`, [f]);
+    flag("r_all", listed);
+    for (const c of rowConds) flag(`r_no_${c.key}`, listed.filter((x) => x !== c));
+    // An arrangement: passes as either, but not as an original
+    flag("r_any", rowConds);
+    flag("r_original", [...rowConds, originalCond]);
+    if (q.orchestra) flag("unscored", [{ key: "unscored", sql: `${ORCHESTRAL} AND ${UNSCORED}`, args: [] }, ...listed.filter((c) => c.key !== "orchestra")]);
+    const pass = (except?: Filter["key"] | "arrangements") => {
+      const work = filters.filter((f) => !onRow(f) && f.key !== except).map((f) => `f_${f.key}`);
+      const row = rowConds.some((c) => c.key === except) ? `r_no_${except}` : except === "arrangements" ? "r_any" : "r_all";
+      return [...work, row].join(" AND ");
+    };
     const none = (n: number) => Array(n).fill("NULL").join(", ");
     const lengthSums = LENGTHS.map((l, i) => `SUM(${pass("length")} AND duration >= ${l.min * 60}${l.max ? ` AND duration < ${l.max * 60}` : ""}) AS length_${i}`);
     stmts.push(
@@ -342,14 +400,14 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
         .prepare(
           `WITH m AS MATERIALIZED (
              SELECT w.id AS id, w.era AS era, c.id AS cid, c.name AS cname, c.sort_name AS csort, w.score AS score, w.free AS free, w.duration AS duration
-             ${flags.map((f) => `, ${f}`).join("")}
+             ${flagSql.map((f) => `, ${f}`).join("")}
              ${orch || q.orchestra ? FROM : CORE} ${cond(facetBase)} GROUP BY w.id
            )
            SELECT 'total' AS kind, NULL AS key, NULL AS name, SUM(${pass()}) AS n,
              SUM(${pass("show")} AND score >= ${CORE_SCORE}) AS core, SUM(${pass("show")} AND free) AS free,
              SUM(${pass("length")} AND duration IS NULL) AS unknown_length, ${lengthSums.join(", ")},
              ${q.orchestra ? `SUM(${pass("orchestra")} AND unscored)` : "NULL"} AS unscored,
-             SUM(${pass("arrangements")} AND NOT original) AS arrangements
+             SUM(${pass("arrangements")} AND NOT r_original) AS arrangements
            FROM m
            UNION ALL
            SELECT 'era', era, NULL, SUM(${pass("era")}), ${none(LENGTHS.length + 5)} FROM m GROUP BY era
@@ -359,7 +417,7 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
              FROM m WHERE cid IS NOT NULL GROUP BY cid HAVING n > 0 ORDER BY n DESC, MIN(csort) LIMIT 300
            )`,
         )
-        .bind(...filters.flatMap((f) => f.args), ...original.args, ...facetBaseArgs),
+        .bind(...flagArgs, ...facetBaseArgs),
     );
   } else if (!multi && !filters.length && q.lineup) {
     stmts.push(db.prepare(`SELECT COUNT(*) AS n FROM scorings s ${cond(base)}`).bind(...baseArgs));
@@ -392,7 +450,7 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
     const other = filters.filter((f) => f.key !== "orchestra");
     stmts.push(
       db
-        .prepare(`SELECT COUNT(DISTINCT s.work_id) AS n ${FROM} ${cond([...base, ...other.map((f) => f.sql), ORCHESTRAL, "o.work_id IS NULL"])}`)
+        .prepare(`SELECT COUNT(DISTINCT s.work_id) AS n ${FROM} ${cond([...base, ...other.map((f) => f.sql), ORCHESTRAL, UNSCORED])}`)
         .bind(...baseArgs, ...other.flatMap((f) => f.args)),
     );
   }
@@ -400,7 +458,7 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
   const unscored = unscoredAlone ? results.pop()!.results[0]?.n : undefined;
   const [rows, counted, lineups] = results;
   // Searching, a row says which of its arrangements the search found it by
-  const searched = searching ? normalize(q.q!).split(" ").filter((w) => w.length >= 2) : undefined;
+  const searched = searching ? searchText(q.q!).split(" ").filter((w) => w.length >= 2) : undefined;
   const works = rows!.results.map((r) => toSummary(r, searched));
   if (precomputed) {
     const r = counted!.results[0];
@@ -425,11 +483,36 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
 
 // ---- Single works and composers ----------------------------------------------
 
-export type Found<T> = { found: T } | { redirect: string } | null;
+export type Found<T> = { found: T } | { redirect: string } | { gone: Gone } | null;
 
+/** An id that isn't live: merged into another (a redirect), retired (gone), or never was */
 async function redirectFor(db: Db, entity: "work" | "composer", id: string): Promise<Found<never>> {
-  const r = await db.prepare("SELECT new_id FROM redirects WHERE entity = ? AND old_id = ?").bind(entity, id).first<Row>();
-  return r ? { redirect: r.new_id } : null;
+  const [redirect, retired] = await db.batch<Row>([
+    db.prepare("SELECT new_id FROM redirects WHERE entity = ? AND old_id = ?").bind(entity, id),
+    db.prepare("SELECT * FROM retired WHERE entity = ? AND id = ?").bind(entity, id),
+  ]);
+  const r = redirect!.results[0];
+  if (r) return { redirect: r.new_id };
+  const g = retired!.results[0];
+  if (!g) return null;
+  const seeAlso = (
+    await db
+      .prepare(
+        `SELECT w.id, w.title, c.name AS cname FROM json_each(?) j JOIN works w ON w.id = j.value LEFT JOIN composers c ON c.id = w.composer_id ORDER BY w.score DESC LIMIT 10`,
+      )
+      .bind(g.see_also)
+      .all<Row>()
+  ).results;
+  return {
+    gone: {
+      id: g.id,
+      title: g.title,
+      composer: g.composer,
+      since: g.since,
+      reason: g.reason,
+      seeAlso: seeAlso.map((w) => ({ id: w.id, title: w.title, composer: w.cname ? { name: w.cname } : null })),
+    },
+  };
 }
 
 const toLink = (r: Row): Link => ({ provider: r.provider, kind: r.kind, ref: r.ref, url: r.url, label: r.label, source: r.source });
@@ -446,7 +529,7 @@ export async function getWork(db: Db, id: string): Promise<Found<WorkDetail>> {
       .prepare("SELECT s.lineup, s.arrangement, s.players, s.sources, l.description FROM scorings s JOIN lineups l ON l.key = s.lineup WHERE s.work_id = ? ORDER BY s.arrangement, s.players, s.lineup")
       .bind(id),
     db.prepare("SELECT * FROM links WHERE entity = 'work' AND entity_id = ? ORDER BY kind DESC, provider, position").bind(id),
-    db.prepare("SELECT scoring, instruments, source, ref FROM orchestrations WHERE work_id = ?").bind(id),
+    db.prepare("SELECT scoring, instruments, status, basis, unresolved, source, ref FROM orchestrations WHERE work_id = ?").bind(id),
     db.prepare("SELECT lineup, arranger, excerpt, heading, license FROM arrangements WHERE work_id = ? ORDER BY position").bind(id),
   ]);
   const w = work!.results[0];
@@ -473,6 +556,9 @@ export async function getWork(db: Db, id: string): Promise<Found<WorkDetail>> {
         ? {
             scoring: o.scoring,
             instruments: JSON.parse(o.instruments),
+            status: o.status,
+            basis: o.basis,
+            unresolved: JSON.parse(o.unresolved),
             source: o.source,
             ref: o.ref,
             url: o.source === "rism" ? `https://rism.online/sources/${o.ref}` : (links!.results.find((l) => l.provider === "imslp")?.url ?? `https://imslp.org/index.php?curid=${o.ref}`),

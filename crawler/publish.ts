@@ -1,7 +1,8 @@
 // Publishes the built dataset (.cache/build/repertoire.sqlite):
 //
-// 1. the downloads (SQLite, CSV) to R2 as a new, immutable version, then points
-//    datasets/latest.json at it;
+// 1. the downloads (SQLite, CSV) to R2 as a new, immutable version, checked by
+//    checksum and completed by a manifest, then points datasets/latest.json at it
+//    (never back at an older one; see publish-downloads.ts);
 // 2. a new D1 database for the version (repertoire-<version>), loaded and checked;
 // 3. dataset.json, which tells the Worker which database to serve. Commit it and
 //    deploy (npm run deploy) to switch the site over.
@@ -9,19 +10,20 @@
 // This is what the scheduled GitHub Action runs after crawling; locally it uses
 // your `cf auth login` session. Each step skips what's already done.
 //
-//   node crawler/publish.ts [--dry-run]
+//   node crawler/publish.ts [--dry-run] [--allow-older] [--allow-degraded]
 
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { parseArgs } from "node:util";
-import { DATASETS_URL, EXPORT_FILES, type LatestFile } from "../src/shared/data.ts";
+import { DATASETS_URL, EXPORT_FILES } from "../src/shared/data.ts";
 import { DATASET_PATH } from "./build.ts";
 import { DATA_TABLES } from "./db.ts";
 import { EXPORT_DIR, writeExports } from "./export.ts";
 import { CACHE_DIR, progress } from "./http.ts";
+import { publishDownloads, type Storage } from "./publish-downloads.ts";
+import { readManifest, releaseProblems } from "./stages.ts";
 import { sqlDump } from "./sqldump.ts";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -30,7 +32,9 @@ const CF = join(ROOT, "node_modules", ".bin", "cf");
 const DATASET_JSON = join(ROOT, "dataset.json");
 const BATCH_BYTES = 4_000_000; // SQL per D1 request
 
-const { values } = parseArgs({ options: { "dry-run": { type: "boolean", default: false } } });
+const { values } = parseArgs({
+  options: { "dry-run": { type: "boolean", default: false }, "allow-older": { type: "boolean", default: false }, "allow-degraded": { type: "boolean", default: false } },
+});
 const dryRun = values["dry-run"];
 
 function cf(args: string[], opts: { json?: boolean } = {}): any {
@@ -43,49 +47,75 @@ function cf(args: string[], opts: { json?: boolean } = {}): any {
 const local = new DatabaseSync(DATASET_PATH, { readOnly: true });
 const meta = Object.fromEntries((local.prepare("SELECT key, value FROM meta").all() as { key: string; value: string }[]).map((r) => [r.key, r.value]));
 const counts = Object.fromEntries(DATA_TABLES.map((t) => [t, (local.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n]));
+const sourceRows = local.prepare("SELECT id, fetched_at FROM sources").all();
 local.close();
 const version = meta.version!;
 console.log(`Publishing dataset ${version}: ${meta.works} works${dryRun ? " (dry run)" : ""}`);
 
+// A refresh that failed somewhere, or data older than its source allows, isn't published
+// as if it were fresh: only on purpose.
+const problems = releaseProblems(
+  { builtAt: meta.built_at!, sources: Object.fromEntries((sourceRows as { id: string; fetched_at: string | null }[]).map((r) => [r.id, { fetchedAt: r.fetched_at }])) as never },
+  await readManifest(),
+);
+if (problems.length) {
+  console.log(`Not a clean refresh:\n${problems.map((p) => `  - ${p}`).join("\n")}`);
+  if (!values["allow-degraded"]) throw new Error("Pass --allow-degraded to publish it anyway");
+}
+
 // ---- 1. Downloads to R2 ---------------------------------------------------------
-const published = await fetch(`${DATASETS_URL}/${version}/${EXPORT_FILES.sqlite}`, { method: "HEAD" }).catch(() => null);
-if (published?.ok) {
-  console.log(`R2: ${version} is already published`);
+// Uncompressed: compressed, the edge gives no length and only a weak ETag
+const IDENTITY = { "Accept-Encoding": "identity" };
+const r2: Storage = {
+  async head(key) {
+    const res = await fetch(`${DATASETS_URL}/${key.replace(/^datasets\//, "")}?t=${Date.now()}`, { method: "HEAD", headers: IDENTITY });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`R2: HEAD ${key}: ${res.status}`);
+    return { bytes: Number(res.headers.get("content-length")), etag: res.headers.get("etag") ?? "" };
+  },
+  async get(key) {
+    // Cache-busted: latest.json changes in place
+    const res = await fetch(`${DATASETS_URL}/${key.replace(/^datasets\//, "")}?t=${Date.now()}`, { headers: IDENTITY });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`R2: GET ${key}: ${res.status}`);
+    return res.text();
+  },
+  async put(key, file, contentType) {
+    cf(["r2", "objects", "put", key, "--bucket-name", BUCKET, "--file", file, "--content-type", contentType]);
+  },
+};
+if (dryRun) {
+  console.log(`R2: would publish ${version}'s downloads and point latest.json at it, unless newer`);
 } else {
-  await writeExports(DATASET_PATH, {
+  await publishDownloads(
+    r2,
     version,
-    builtAt: meta.built_at!,
-    works: Number(meta.works),
-    composers: Number(meta.composers),
-    lineups: Number(meta.lineups),
-    sources: {} as never,
-    stats: null,
-  });
-  const outDir = join(CACHE_DIR, "publish", version);
-  await mkdir(outDir, { recursive: true });
-  const metaPath = join(outDir, "meta.json");
-  await writeFile(metaPath, JSON.stringify(meta, null, 2));
-  const put = (key: string, file: string, contentType: string) => {
-    const args = ["r2", "objects", "put", key, "--bucket-name", BUCKET, "--file", file, "--content-type", contentType];
-    if (dryRun) args.push("--dry-run");
-    cf(args);
-    console.log(`  ↑ ${key}`);
-  };
-  const latest: LatestFile = { version, builtAt: meta.built_at!, files: {} };
-  for (const [name, path, type] of [
-    [EXPORT_FILES.sqlite, join(EXPORT_DIR, EXPORT_FILES.sqlite), "application/gzip"],
-    [EXPORT_FILES.csv, join(EXPORT_DIR, EXPORT_FILES.csv), "application/zip"],
-    ["meta.json", metaPath, "application/json"],
-  ] as const) {
-    const data = await readFile(path);
-    latest.files[name] = { bytes: data.length, sha256: createHash("sha256").update(data).digest("hex") };
-    put(`datasets/${version}/${name}`, path, type);
-  }
-  // Last: switching latest.json makes the new version current.
-  const latestPath = join(outDir, "latest.json");
-  await writeFile(latestPath, JSON.stringify(latest, null, 2));
-  put("datasets/latest.json", latestPath, "application/json");
-  if (!dryRun) await rm(outDir, { recursive: true, force: true });
+    meta.built_at!,
+    [
+      { name: EXPORT_FILES.sqlite, file: join(EXPORT_DIR, EXPORT_FILES.sqlite), contentType: "application/gzip" },
+      { name: EXPORT_FILES.csv, file: join(EXPORT_DIR, EXPORT_FILES.csv), contentType: "application/zip" },
+      { name: "meta.json", file: join(CACHE_DIR, "publish", version, "meta.json"), contentType: "application/json" },
+    ],
+    async () => {
+      await writeExports(DATASET_PATH, {
+        version,
+        builtAt: meta.built_at!,
+        works: Number(meta.works),
+        composers: Number(meta.composers),
+        lineups: Number(meta.lineups),
+        sources: {} as never,
+        stats: null,
+      });
+      await mkdir(join(CACHE_DIR, "publish", version), { recursive: true });
+      await writeFile(join(CACHE_DIR, "publish", version, "meta.json"), JSON.stringify(meta, null, 2));
+    },
+  );
+}
+
+// Serving an older version than dataset.json does is a rollback: only when asked.
+const serving = JSON.parse(await readFile(DATASET_JSON, "utf8").catch(() => "{}")).version as string | undefined;
+if (serving && serving > version && !values["allow-older"]) {
+  throw new Error(`dataset.json serves ${serving}, newer than ${version}: pass --allow-older to roll back to it`);
 }
 
 // ---- 2. D1 ------------------------------------------------------------------------

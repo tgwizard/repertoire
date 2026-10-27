@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { after, test } from "node:test";
-import type { ComposerDetail, LineupsIndex, Meta, SearchResults, WorkDetail, WorksPage } from "../src/shared/data.ts";
+import type { ComposerDetail, Gone, LineupsIndex, Meta, SearchResults, WorkDetail, WorksPage } from "../src/shared/data.ts";
 import { sqliteDb } from "../crawler/d1.ts";
 import { buildFixture } from "../test/fixtures.ts";
 import { precomputeFacets } from "../crawler/build.ts";
@@ -122,20 +122,24 @@ test("orchestral works an orchestra can play, or scored for exactly it; how many
     return [page.works.map((w) => w.title).sort(), page.unscored];
   };
   const fit = (s: string) => `orchestra=${encodeURIComponent(s)}`;
-  // Brahms 4 needs a piccolo player and percussion; Olsen's scoring isn't known
-  assert.deepEqual(await titles(fit("2.2.2.3 4.2.3.0 timp hp str")), [["Symphony No.1, Op.68"], 1]);
-  assert.deepEqual(await titles(fit("3.2.2.3 4.2.3.1 timp perc hp str")), [["Symphony No.1, Op.68", "Symphony No.4, Op.98"], 1]);
+  // Brahms 1 needs a contrabassoon: a third bassoonist isn't one, unless we say so
+  assert.deepEqual(await titles(fit("2.2.2.3 4.2.3.0 timp hp str")), [[], 1]);
+  assert.deepEqual(await titles(fit("2.2.2.2+cbn 4.2.3.0 timp hp str")), [["Symphony No.1, Op.68"], 1]);
+  // Brahms 4 needs a piccolo and percussion: our third flautist doubling piccolo will do.
+  // Olsen's scoring isn't known (only the string parts are on IMSLP)
+  assert.deepEqual(await titles(fit("3.2.2.2+cbn 4.2.3.1 timp perc hp str")), [["Symphony No.1, Op.68"], 1]);
+  assert.deepEqual(await titles(fit("3/picc.2.2.2+cbn 4.2.3.1 timp perc hp str")), [["Symphony No.1, Op.68", "Symphony No.4, Op.98"], 1]);
   assert.deepEqual(await titles(`${fit("2.2.2.2+cbn 4.2.3.0 timp hp str")}&fit=exact`), [["Symphony No.1, Op.68"], 1]);
   assert.deepEqual(await titles(fit("2.2.2.2 2.2.0.0 timp str")), [[], 1]);
   // Smaller groups: string orchestra works too, when the orchestra has strings
-  const smaller = await get<WorksPage>(`/api/works?lineup=orchestra&subsets=1&${fit("2.2.2.3 4.2.3.0 timp hp str")}`);
+  const smaller = await get<WorksPage>(`/api/works?lineup=orchestra&subsets=1&${fit("2.2.2.2+cbn 4.2.3.0 timp hp str")}`);
   assert.deepEqual(smaller.works.map((w) => w.title).sort(), ["Serenade for Strings, Op.48", "Symphony No.1, Op.68"]);
   assert.equal(smaller.works.find((w) => w.lineup === "orchestra")!.orchestration, "2.2.2.2+cbn – 4.2.3.0 – timp – hp – str");
   await assert.rejects(get(`/api/works?lineup=orchestra&orchestra=lots`), /400/);
 });
 
 test("facets count with the other filters applied, but not their own", async () => {
-  const fit = `orchestra=${encodeURIComponent("2.2.2.3 4.2.3.0 timp hp str")}`;
+  const fit = `orchestra=${encodeURIComponent("2.2.2.2+cbn 4.2.3.0 timp hp str")}`;
   const all = await get<WorksPage>("/api/works?lineup=orchestra&facets=1");
   const fitting = await get<WorksPage>(`/api/works?lineup=orchestra&facets=1&${fit}`);
   assert.equal(all.facets!.eras.Romantic, 3);
@@ -199,6 +203,43 @@ test("duration: filters and sort", async () => {
   assert.equal((await get<WorksPage>(`/api/works?lineup=${QUARTET}&duration=unknown`)).total, all.total - 1);
 });
 
+test("facets never change the total, and paging through yields exactly that many works", async () => {
+  // Tchaikovsky's Serenade is an original for strings and an arrangement (by Jerkert) for
+  // wind quintet: with both line-ups in reach, searching for Jerkert among originals finds
+  // nothing, as the row that's an original isn't the row that's his.
+  const queries = [
+    `lineup=bassoon,clarinet,flute,horn,oboe,strings&subsets=1&q=jerkert`,
+    `lineup=bassoon,clarinet,flute,horn,oboe,strings&subsets=1&q=jerkert&arrangements=1`,
+    `lineup=bassoon,clarinet,flute,horn,oboe,strings&subsets=1`,
+    `lineup=bassoon,clarinet,flute,horn,oboe,strings&subsets=1&q=serenade`,
+    `lineup=${WIND_QUINTET}&q=jerkert`,
+    `lineup=${WIND_QUINTET}&q=jerkert&arrangements=1&era=Romantic`,
+    `lineup=${QUARTET}&arrangements=1&show=free`,
+    `lineup=orchestra&orchestra=2.2.2.2,4.2.3.1,timp,str`,
+    `lineup=orchestra&orchestra=2.2.2.2,4.2.3.1,timp,str&fit=exact&arrangements=1`,
+    `q=jerkert`,
+    `q=tchaikovsky&arrangements=1`,
+    `q=brahms`,
+  ];
+  for (const query of queries) {
+    const faceted = await get<WorksPage>(`/api/works?${query}&facets=1`);
+    const plain = await get<WorksPage>(`/api/works?${query}`);
+    assert.equal(faceted.total, plain.total, query);
+    const ids = new Set<string>();
+    for (let offset = 0; offset <= plain.total + 1; offset += 2) {
+      const page = await get<WorksPage>(`/api/works?${query}&limit=2&offset=${offset}`);
+      for (const w of page.works) ids.add(w.id);
+      if (!page.works.length) break;
+    }
+    assert.equal(ids.size, plain.total, query);
+  }
+  // The case the review found: an original row and an arranger's row of one work
+  const mixed = await get<WorksPage>(`/api/works?${queries[0]}&facets=1`);
+  assert.equal(mixed.total, 0);
+  assert.deepEqual(mixed.facets!.composers, []);
+  assert.equal(mixed.facets!.arrangements, 1);
+});
+
 test("arrangements say who arranged them; searching finds them by arranger", async () => {
   // On the line-up's list, an arrangement row says whose it is, and of what
   const arranged = await get<WorksPage>(`/api/works?lineup=${WIND_QUINTET}&arrangements=1`);
@@ -259,6 +300,9 @@ test("a work: its line-ups, links, aliases and ranking", async () => {
   assert.deepEqual(symphony.orchestration, {
     scoring: "2+picc.2.2.2+cbn – 4.2.3.0 – timp – perc – str",
     instruments: { fl: 2, picc: 1, ob: 2, cl: 2, bn: 2, cbn: 1, hn: 4, tpt: 2, tbn: 3, timp: 1, perc: 1, str: 1 },
+    status: "single",
+    basis: "a library's copy",
+    unresolved: [],
     source: "rism",
     ref: "9004",
     url: "https://rism.online/sources/9004",
@@ -295,6 +339,17 @@ test("search: titles, aliases, catalogue numbers and composer names, accents fol
   assert.deepEqual(c.composers.map((x) => x.name), ["Francis Poulenc"]);
 });
 
+test("retired ids answer 410, saying what they were and what they may be", async () => {
+  const quartet = (await get<WorksPage>(`/api/works?lineup=${QUARTET}`)).works[0]!;
+  const rw = new DatabaseSync(path);
+  rw.prepare("INSERT INTO retired VALUES ('work', 'zzzzzzz1', 'Quartet', 'Nobody', '20261101T000000Z', 'uncertain', ?)").run(JSON.stringify([quartet.id]));
+  rw.close();
+  const gone = await get<{ gone: Gone }>("/api/works/zzzzzzz1", 410);
+  assert.deepEqual(gone.gone.seeAlso.map((w) => w.id), [quartet.id]);
+  assert.equal(gone.gone.reason, "uncertain");
+  await get("/api/works/zzzzzzz2", 404);
+});
+
 test("merged ids redirect; unknown ids 404; bad input 400", async () => {
   const meta = await get<WorksPage>(`/api/works?lineup=${WIND_QUINTET}`);
   const barber = meta.works.find((w) => w.title === "Summer Music, Op.31")!;
@@ -313,6 +368,11 @@ test("merged ids redirect; unknown ids 404; bad input 400", async () => {
   await get("/api/works?composer=../x", 400);
   await get("/api/search", 400);
   await get("/api/works?lineup=violin&limit=abc", 400);
+  // Inherited object properties aren't sorts (they used to be a 500)
+  for (const sort of ["constructor", "toString", "__proto__", "nonsense"]) await get(`/api/works?lineup=violin&sort=${sort}`, 400);
+  await get("/api/works?lineup=violin&order=sideways", 400);
+  await get("/api/works?lineup=violin&fit=loose", 400);
+  await get("/api/works?lineup=violin&show=some", 400);
   // Odd search input is safe: quotes and operators are words, not FTS syntax.
   assert.deepEqual((await get<SearchResults>(`/api/search?q=${encodeURIComponent('"op" OR NEAR( * -')}`)).works.length >= 0, true);
   const res = await handleApi(new Request("http://test/api/meta", { method: "POST" }), db);

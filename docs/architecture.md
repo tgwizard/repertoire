@@ -13,14 +13,14 @@ crawl (local or CI)                 Cloudflare
 
 ## Parts
 
-**Crawler** (`crawler/`). One stage per source (`crawler/sources/`), each writing a normalized JSON file to `.cache/stages/`. Every HTTP response is cached on disk, so a crawl can stop and resume, and re-runs fetch only what's changed or expired. It's polite (one request at a time per host, with a gap, an identifying User-Agent) and resilient (retries with backoff, a failed source keeps its previous data). See [data.md](data.md).
+**Crawler** (`crawler/`). One stage per source (`crawler/sources/`), each writing a normalized JSON file to `.cache/stages/`. Every HTTP response is cached on disk, so a crawl can stop and resume, and re-runs fetch only what's changed or expired. It's polite (one request at a time per host, with a gap, an identifying User-Agent) and resilient (retries with backoff, a failed source keeps its previous data). A stage file is only ever written whole. `.cache/stages/manifest.json` records each stage's last run and last completed run, the requests that failed (their earlier results kept) and stale cache used; a run with a failed stage exits non-zero, so `data:refresh` stops before publishing. See [data.md](data.md).
 
 **Build** (`crawler/build.ts`). Merges the stages into one SQLite database, `.cache/build/repertoire.sqlite` (schema in `crawler/db.ts`). This file *is* the dataset: the downloads, D1 and the tests all use it. Building keeps ids from the previous dataset (see [Persistent ids](data.md#persistent-ids)).
 
-**Publish** (`crawler/publish.ts`). Each dataset version is immutable:
-1. the SQLite file (gzipped) and a zip of CSVs go to the public R2 bucket under `datasets/<version>/`, then `datasets/latest.json` points at them;
+**Publish** (`crawler/publish.ts`). First a release check (`crawler/stages.ts`): a stage whose last run failed or never completed, many failed requests, a partial run, or a source older than its own limit (a weekly query 21 days, a dump downloaded every 60 days 90) stop it, unless `--allow-degraded`. Each dataset version is immutable:
+1. the SQLite file (gzipped), a zip of CSVs and meta.json go to the public R2 bucket under `datasets/<version>/`, each checked against its checksum (R2's ETag is the MD5 of an object uploaded whole), then `manifest.json`, written last, says the version is complete. A run that stopped anywhere is completed by the next, re-uploading only what's missing or wrong; a complete version that changed is an error. Then `datasets/latest.json` points at it, unless it already names a newer version (`crawler/publish-downloads.ts`);
 2. a new D1 database, `repertoire-<version>`, is created and loaded. D1 takes SQL, not files, so `crawler/sqldump.ts` turns the database into batched `INSERT`s, sent with `cf d1 raw`. The table counts are checked against the file afterwards;
-3. `dataset.json` records the version and its D1 database. It's committed, and the next deploy binds the Worker to that database.
+3. `dataset.json` records the version and its D1 database (never an older version than it has, unless `--allow-older`). It's committed, and the next deploy binds the Worker to that database.
 
 A new database per version, rather than updating one in place, means the site switches datasets atomically at deploy, rolling back is redeploying an older `dataset.json`, and a half-finished load is never served. Old versions' databases can be deleted once no deploy uses them.
 

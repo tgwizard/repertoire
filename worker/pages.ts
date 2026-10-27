@@ -3,7 +3,7 @@
 // search engines see the content. The app then takes over in the browser.
 
 import { describe, parseEnsembleKey } from "../src/lib/instrumentation.ts";
-import type { ComposerDetail, WorkDetail } from "../src/shared/data.ts";
+import { PROVIDERS, type ComposerDetail, type Gone, type WorkDetail } from "../src/shared/data.ts";
 import { composerPath, formatDuration, workPath } from "../src/shared/paths.ts";
 import { getComposer, getWork, type Db } from "./queries.ts";
 
@@ -35,7 +35,7 @@ function workPage(w: WorkDetail, origin: string): Page {
     (originals.length > 1 ? ` Also for ${originals.length - 1} other line-up${originals.length > 2 ? "s" : ""}.` : "") +
     (w.orchestration ? ` Scoring: ${w.orchestration.scoring}.` : "") +
     (w.duration ? ` About ${formatDuration(w.duration)}.` : "") +
-    (score ? " Free sheet music on IMSLP." : "");
+    (score ? ` Sheet music linked on ${PROVIDERS[score.provider].name}.` : "");
   const url = `${origin}${workPath(w)}`;
   return {
     status: 200,
@@ -80,6 +80,25 @@ function composerPage(c: ComposerDetail, origin: string): Page {
   };
 }
 
+/** A retired id: what it was, why it's gone, and where to look instead */
+function gonePage(g: Gone, origin: string): Page {
+  const what = `${g.title}${g.composer ? ` by ${g.composer}` : ""}`;
+  const description =
+    g.reason === "uncertain"
+      ? `${what} is no longer listed: it may be a work listed under another title.`
+      : `${what} is no longer listed: its sources no longer have it, or no longer say what it's for.`;
+  const links = g.seeAlso.map((w) => `<li><a href="${esc(`${origin}${workPath(w)}`)}">${esc(w.title)}</a></li>`).join("");
+  return {
+    status: 410,
+    title: `No longer listed · ${SITE}`,
+    description,
+    canonical: null,
+    jsonLd: null,
+    body: `<main class="ssr"><h1>${esc(what)}</h1><p>${esc(description)}</p>${links ? `<ul>${links}</ul>` : ""}</main>`,
+    initial: { type: "gone", id: g.id, data: g },
+  };
+}
+
 const notFound = (what: string): Page => ({
   status: 404,
   title: `Not found · ${SITE}`,
@@ -100,11 +119,11 @@ export async function renderPage(request: Request, db: Db, indexHtml: () => Prom
   if (type === "work") {
     const r = await getWork(db, id);
     if (r && "redirect" in r) return Response.redirect(`${url.origin}/work/${r.redirect}`, 301);
-    page = r ? workPage(r.found, url.origin) : notFound("work");
+    page = !r ? notFound("work") : "gone" in r ? gonePage(r.gone, url.origin) : workPage(r.found, url.origin);
   } else {
     const r = await getComposer(db, id);
     if (r && "redirect" in r) return Response.redirect(`${url.origin}/composer/${r.redirect}`, 301);
-    page = r ? composerPage(r.found, url.origin) : notFound("composer");
+    page = !r ? notFound("composer") : "gone" in r ? gonePage(r.gone, url.origin) : composerPage(r.found, url.origin);
   }
 
   const html = await indexHtml();

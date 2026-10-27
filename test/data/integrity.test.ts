@@ -3,16 +3,17 @@
 // Run after each build, before publishing (npm run test:data).
 
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { DATASET_PATH, PREVIOUS_PATH, readPrevious } from "../../crawler/build.ts";
 import { SCHEMA_VERSION } from "../../crawler/db.ts";
 import { ID_PATTERN } from "../../crawler/ids.ts";
 import { describe, ensembleKey, parseEnsembleKey, playerCount } from "../../src/lib/instrumentation.ts";
-import { formatOrchestration, LABELS, orchestraColumns } from "../../src/lib/orchestration.ts";
+import { column, formatOrchestration, LABELS, ORCHESTRA_KEYS } from "../../src/lib/orchestration.ts";
 import { sqliteDb } from "../../crawler/d1.ts";
-import { listWorks, PRECOMPUTED_FACETS_MIN } from "../../worker/queries.ts";
+import { ftsQuery, listWorks, PRECOMPUTED_FACETS_MIN } from "../../worker/queries.ts";
 import { ERAS, PROVIDERS, score, SIGNALS, type ProviderId, type Signal } from "../../src/shared/data.ts";
 import { normalize } from "../../src/shared/text.ts";
 
@@ -110,20 +111,42 @@ test("text is composed (NFC), so it matches and searches the way it's typed", ()
   assert.deepEqual(problems, []);
 });
 
+test("no text was garbled in decoding (U+FFFD), anywhere", () => {
+  // A replacement character means bytes were decoded wrongly on the way in: it fails the
+  // release, naming the records it came from so the stage can be fixed and regenerated.
+  const garbled = (table: string, columns: string[]) => columns.map((c) => `instr(${table}.${c}, char(65533)) > 0`).join(" OR ");
+  const records = (entity: string, id: string) =>
+    all(`SELECT provider || ':' || ref AS r FROM links WHERE entity = '${entity}' AND entity_id = '${id}'`).map((r) => r.r).join(" ");
+  const problems = [
+    ...all(`SELECT id, title AS t FROM works WHERE ${garbled("works", ["title", "aliases"])}`).map((r) => `work ${r.id} (${records("work", r.id)}): ${r.t}`),
+    ...all(`SELECT id, name AS t FROM composers WHERE ${garbled("composers", ["name", "sort_name"])}`).map((r) => `composer ${r.id} (${records("composer", r.id)}): ${r.t}`),
+    ...all(`SELECT entity_id AS id, provider || ':' || ref AS t FROM links WHERE ${garbled("links", ["label", "ref", "url"])}`).map((r) => `link of ${r.id}: ${r.t}`),
+    ...all(`SELECT work_id AS id, heading AS t FROM arrangements WHERE ${garbled("arrangements", ["heading", "arranger", "excerpt"])}`).map((r) => `arrangement of ${r.id}: ${r.t}`),
+    ...all(`SELECT key AS id, sources AS t FROM lineups WHERE ${garbled("lineups", ["description", "sources"])}`).map((r) => `line-up ${r.id}`),
+  ];
+  assert.deepEqual(problems, []);
+});
+
 test("orchestral scorings: for orchestral works, whole orchestras, columns as the instruments say", () => {
   none(
     "SELECT o.work_id FROM orchestrations o WHERE NOT EXISTS (SELECT 1 FROM scorings s WHERE s.work_id = o.work_id AND s.arrangement = 0 AND s.lineup LIKE '%orchestra%')",
     "scorings for works not written for orchestra",
   );
-  none("SELECT work_id FROM orchestrations WHERE str = 0 AND work_id NOT IN (SELECT work_id FROM scorings WHERE lineup LIKE '%orchestra without strings%')", "orchestras without strings");
+  none(
+    "SELECT work_id FROM orchestrations WHERE str = 0 AND status != 'partial' AND work_id NOT IN (SELECT work_id FROM scorings WHERE lineup LIKE '%orchestra without strings%')",
+    "orchestras without strings",
+  );
+  none("SELECT work_id FROM orchestrations WHERE status NOT IN ('confirmed', 'single', 'partial') OR basis = ''", "scorings without a status or basis");
+  // A scoring with parts we can't read is partial: it never says what an orchestra can play
+  none("SELECT work_id FROM orchestrations WHERE unresolved != '[]' AND status != 'partial'", "unresolved parts in a scoring relied on");
   for (const r of all("SELECT * FROM orchestrations")) {
     const o = JSON.parse(r.instruments);
     assert.equal(r.scoring, formatOrchestration(o), r.work_id);
-    for (const [k, n] of Object.entries(orchestraColumns(o))) assert.equal(r[k], n, `${r.work_id}.${k}`);
-    assert.ok(Object.keys(o).every((k) => k in LABELS), `${r.work_id}: unknown instrument in ${r.instruments}`);
+    for (const k of ORCHESTRA_KEYS) assert.equal(r[column(k)], o[k] ?? 0, `${r.work_id}.${k}`);
+    assert.ok(Object.keys(o).every((k) => k.split("/").every((i) => i in LABELS)), `${r.work_id}: unknown instrument in ${r.instruments}`);
   }
-  const n = one("SELECT COUNT(*) AS n FROM orchestrations").n;
-  assert.ok(n > 4_000, `only ${n} orchestral scorings`);
+  const n = one("SELECT COUNT(*) AS n FROM orchestrations WHERE status != 'partial'").n;
+  assert.ok(n > 4_000, `only ${n} orchestral scorings to rely on`);
 });
 
 test("precomputed facets are what the API would count, for the big line-ups", async () => {
@@ -179,10 +202,14 @@ test("composers: every one has works, and counts match", () => {
   none("SELECT id FROM composers WHERE died < born + 10 OR died - born > 105", "impossible lifespans");
   none("SELECT id FROM composers WHERE trim(name) = '' OR name != trim(name)", "blank or untrimmed names");
   for (const c of all("SELECT id FROM composers")) assert.match(c.id, ID_PATTERN);
-  // One person, several entries: a source's composer that didn't match ours. A few are
-  // namesakes (or unmatchable); more means name matching broke.
-  const twins = all("SELECT name, born, COUNT(*) AS entries FROM composers WHERE born IS NOT NULL GROUP BY name, born HAVING entries > 1");
-  assert.ok(twins.length <= 30, `${twins.length} composers listed twice, e.g. ${twins.slice(0, 5).map((t) => `${t.name} (${t.born})`).join(", ")}`);
+  // One person, several entries: a source's composer that didn't match ours. Known ones,
+  // each with its reason; any other is a new failure to reconcile.
+  const KNOWN_TWINS = [
+    "Jacques Rensburg (1846)", // two Wikidata items (Q106624167, Q94860952), one per source
+    "Robert Scholz (1902)", // two Wikidata items and GND records, dying 1981 and 1986: perhaps two people
+  ];
+  const twins = all("SELECT name, born, COUNT(*) AS entries FROM composers WHERE born IS NOT NULL GROUP BY name, born HAVING entries > 1").map((t) => `${t.name} (${t.born})`);
+  assert.deepEqual(twins.filter((t) => !KNOWN_TWINS.includes(t)), [], "composers listed twice");
 });
 
 test("links: one record per provider id, well-formed, of the provider's kind", () => {
@@ -209,9 +236,11 @@ test("links: one record per provider id, well-formed, of the provider's kind", (
   none("SELECT entity_id FROM links WHERE provider = 'openopus' AND url IS NOT NULL", "Open Opus links with URLs");
 });
 
-test("redirects point at live ids, directly", () => {
-  none("SELECT old_id FROM redirects r WHERE entity = 'work' AND NOT EXISTS (SELECT 1 FROM works w WHERE w.id = r.new_id)", "work redirects to missing works");
-  none("SELECT old_id FROM redirects r WHERE entity = 'composer' AND NOT EXISTS (SELECT 1 FROM composers c WHERE c.id = r.new_id)", "composer redirects to missing composers");
+test("redirects point at live ids (or retired ones, whose page says what they were), directly", () => {
+  const retired = (entity: string) => `EXISTS (SELECT 1 FROM retired t WHERE t.entity = '${entity}' AND t.id = r.new_id)`;
+  none(`SELECT old_id FROM redirects r WHERE entity = 'work' AND NOT EXISTS (SELECT 1 FROM works w WHERE w.id = r.new_id) AND NOT ${retired("work")}`, "work redirects to missing works");
+  none(`SELECT old_id FROM redirects r WHERE entity = 'composer' AND NOT EXISTS (SELECT 1 FROM composers c WHERE c.id = r.new_id) AND NOT ${retired("composer")}`, "composer redirects to missing composers");
+  none("SELECT r.id FROM retired r WHERE EXISTS (SELECT 1 FROM works w WHERE w.id = r.id) OR EXISTS (SELECT 1 FROM composers c WHERE c.id = r.id)", "retired ids that are live");
   none("SELECT old_id FROM redirects r WHERE EXISTS (SELECT 1 FROM works w WHERE w.id = r.old_id) OR EXISTS (SELECT 1 FROM composers c WHERE c.id = r.old_id)", "redirects from live ids");
   none("SELECT a.old_id FROM redirects a JOIN redirects b ON b.entity = a.entity AND b.old_id = a.new_id", "redirect chains");
 });
@@ -222,30 +251,60 @@ test("search index covers every work and composer", () => {
   none("SELECT f.rowid FROM works_fts f LEFT JOIN works w ON w.n = f.rowid WHERE w.n IS NULL", "search rows for missing works");
 });
 
-test("ids stayed put since the previous build", { skip: !existsSync(PREVIOUS_PATH) && "no previous build kept" }, () => {
+test("every work can be found by its exact title, whatever the script", () => {
+  // Per script in the titles (by their first letter), up to 200 works: the search for the
+  // title, as typed, must match the work itself.
+  const byScript = new Map<string, { n: number; title: string }[]>();
+  const SCRIPTS = ["Latin", "Cyrillic", "Greek", "Han", "Hiragana", "Katakana", "Hangul", "Hebrew", "Arabic", "Armenian", "Georgian", "Devanagari", "Thai"];
+  for (const r of db.prepare("SELECT n, title FROM works ORDER BY n").iterate() as Iterable<{ n: number; title: string }>) {
+    const letter = /\p{L}/u.exec(r.title)?.[0];
+    if (!letter) continue;
+    const script = SCRIPTS.find((s) => new RegExp(`\\p{Script=${s}}`, "u").test(letter)) ?? "other";
+    const list = byScript.get(script) ?? [];
+    if (list.length < 200) list.push(r), byScript.set(script, list);
+  }
+  assert.ok(byScript.get("Cyrillic")?.length, "no Cyrillic titles to check");
+  const found = db.prepare("SELECT 1 FROM works_fts WHERE works_fts MATCH ? AND rowid = ?");
+  const missed: string[] = [];
+  for (const [script, works] of byScript)
+    for (const w of works) {
+      const q = ftsQuery(w.title);
+      if (!q || !found.get(q, w.n)) missed.push(`${script}: ${w.title}`);
+    }
+  assert.deepEqual(missed.slice(0, 10), []);
+});
+
+test("ids stayed put since the previous build: every one live, redirected or retired", { skip: !existsSync(PREVIOUS_PATH) && "no previous build kept" }, () => {
   const previous = readPrevious(PREVIOUS_PATH);
   const current = readPrevious(DATASET_PATH)!;
   if (!previous) return;
+  const report: string[] = [];
+  const problems: string[] = [];
   for (const entity of ["work", "composer"] as const) {
-    const live = new Set(current[entity].anchors.values());
+    const table = entity === "work" ? "works" : "composers";
+    const live = new Set(all(`SELECT id FROM ${table}`).map((r) => r.id as string));
+    const retired = new Set(all(`SELECT id FROM retired WHERE entity = '${entity}'`).map((r) => r.id as string));
+    // Every id the last dataset had still means something: the entity, a redirect, or a
+    // retired id's page saying what it was
+    const was: Map<string, unknown> = entity === "work" ? previous.works : previous.composers;
+    const lost: string[] = [...was.keys()].filter((id) => !live.has(id) && !current[entity].redirects.has(id) && !retired.has(id));
+    assert.deepEqual(lost.slice(0, 10), [], `${entity}: ${lost.length} ids lost without a redirect or a retirement`);
+    // A record whose entity changed id: a split or a merge
     let kept = 0;
-    let moved = 0;
-    const examples: string[] = [];
+    const moved: string[] = [];
     for (const [anchor, id] of previous[entity].anchors) {
       const now = current[entity].anchors.get(anchor);
-      if (!now) continue; // the record left its source
-      const resolved = current[entity].redirects.get(id) ?? id;
-      if (resolved === now) kept++;
-      else {
-        moved++;
-        if (examples.length < 5) examples.push(`${anchor}: ${id} → ${now}`);
-      }
+      if (!now || !live.has(id)) continue; // the record left, or its old entity did
+      if ((current[entity].redirects.get(id) ?? id) === now) kept++;
+      else moved.push(`${anchor}: ${id} → ${now}`);
     }
-    // An id may move when a work splits; anything beyond a handful means ids aren't stable.
-    assert.ok(moved <= Math.max(20, kept * 0.002), `${entity}: ${moved} anchors changed id (of ${kept + moved}), e.g. ${examples.join("; ")}`);
-    const vanished: string[] = [...new Set(previous[entity].anchors.values())].filter((id) => !live.has(id) && !current[entity].redirects.has(id));
-    // Records do leave their sources (an IMSLP page deleted), but rarely: a work merged into
-    // another must leave a redirect, so its URL keeps working.
-    assert.ok(vanished.length <= Math.max(50, live.size * 0.001), `${entity}: ${vanished.length} ids vanished without a redirect, e.g. ${vanished.slice(0, 5).join(", ")}`);
+    const gone = all(`SELECT reason, COUNT(*) AS n FROM retired WHERE entity = '${entity}' AND since = '${meta.version}' GROUP BY reason`);
+    report.push(`${entity}: ${kept} records kept their ids, ${moved.length} moved; retired now: ${JSON.stringify(gone)}`, ...moved.map((m) => `  ${m}`));
+    // An id may move when a work splits; anything beyond a handful means ids aren't stable,
+    // unless a correction meant it to (ALLOW_ID_MOVES=n; see id-changes.txt)
+    const allowed = Math.max(20, kept * 0.002, Number(process.env.ALLOW_ID_MOVES ?? 0));
+    if (moved.length > allowed) problems.push(`${entity}: ${moved.length} records changed id (of ${kept + moved.length}), e.g. ${moved.slice(0, 5).join("; ")}`);
   }
+  writeFileSync(join(dirname(DATASET_PATH), "id-changes.txt"), report.join("\n") + "\n");
+  assert.deepEqual(problems, [], "see id-changes.txt next to the dataset");
 });
