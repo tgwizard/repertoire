@@ -17,12 +17,15 @@ interface Props {
   lineup?: string;
   /** Show each work's line-up (lists that mix line-ups: composers, search) */
   showLineup?: boolean;
+  /** Offer to filter the list to a work's composer (the name itself goes to their page) */
   onComposer?: (id: string) => void;
+  /** The composer the list is filtered to already */
+  composer?: string;
   /** Group headings when the number of players changes (smaller groups, by size) */
   groupByPlayers?: number;
 }
 
-export function WorkList({ works, lineup, showLineup, onComposer, groupByPlayers }: Props) {
+export function WorkList({ works, lineup, showLineup, onComposer, composer, groupByPlayers }: Props) {
   let lastPlayers = -1;
   return (
     <ol className="works">
@@ -46,16 +49,18 @@ export function WorkList({ works, lineup, showLineup, onComposer, groupByPlayers
               {w.arrangement && <span className="badge badge-arr">Arrangement</span>}
             </div>
             <div className="work-meta">
-              {w.composer &&
-                (onComposer ? (
-                  <button className="composer" onClick={() => onComposer(w.composer!.id)} title="Show only this composer">
-                    {w.composer.name}
-                  </button>
-                ) : (
-                  <Link className="composer" href={composerPath(w.composer)}>
-                    {w.composer.name}
-                  </Link>
-                ))}
+              {w.composer && (
+                <Link className="composer" href={composerPath(w.composer)}>
+                  {w.composer.name}
+                </Link>
+              )}
+              {w.composer && onComposer && w.composer.id !== composer && (
+                <button className="composer-filter" onClick={() => onComposer(w.composer!.id)} title={`Show only ${w.composer.name}`} aria-label={`Show only ${w.composer.name}`}>
+                  <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                    <path d="M2 3h12l-4.5 5.5V13l-3 1.5v-6z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              )}
               {lifespan(w.composer) && <span className="muted">{lifespan(w.composer)}</span>}
               {w.year && <span className="muted">· {w.year}</span>}
               {w.era && <span className="badge">{w.era}</span>}

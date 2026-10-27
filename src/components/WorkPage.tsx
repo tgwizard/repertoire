@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { composerPath, finderPath, lifespan, useApi, type ComposerDetail, type WorkDetail, type WorksPage } from "../lib/api";
 import { Link } from "../lib/router";
 import { describeOrchestration } from "../lib/orchestration";
@@ -36,7 +36,25 @@ function LinkItem({ l }: { l: WorkLink }) {
   );
 }
 
+// A score link: a short button naming where it is, the edition's own title beside it
+function ScoreLink({ l }: { l: WorkLink }) {
+  if (!l.url) return <LinkItem l={l} />;
+  const text = l.provider === "imslp" ? "Sheet music on IMSLP" : l.provider === "mutopia" ? "Engraved edition on Mutopia" : PROVIDERS[l.provider].name;
+  const caption = l.provider === "imslp" ? null : l.label;
+  return (
+    <li>
+      <a className="button-link" href={l.url} target="_blank" rel="noreferrer">
+        {text}
+      </a>
+      {caption && <span className="muted small">{caption}</span>}
+    </li>
+  );
+}
+
+const ALIASES_SHOWN = 3;
+
 export function WorkPage({ id }: { id: string }) {
+  const [allAliases, setAllAliases] = useState(false);
   const { data: w, error, loading } = useApi<WorkDetail>(`/api/works/${id}`);
   const main = w?.scorings.find((s) => !s.arrangement) ?? w?.scorings[0];
   const composer = useApi<ComposerDetail>(w?.composer && w.copies > 0 ? `/api/composers/${w.composer.id}` : null);
@@ -68,6 +86,13 @@ export function WorkPage({ id }: { id: string }) {
       .map((a) => arrangedText({ arranger: a.arranger, excerpt: a.excerpt }))
       .filter((t): t is string => !!t);
   const unplaced = w.arrangements.filter((a) => !a.lineup);
+  const facts = [w.year && String(w.year), w.duration && `about ${formatDuration(w.duration)}`, w.movements && w.movements > 1 && `${w.movements} movements`].filter(
+    (f): f is string => !!f,
+  );
+  // The era is the composer's; only a work that differs says so itself
+  const workEra = w.era && w.era !== w.composer?.era ? w.era : null;
+  // Stockholm's copies under one heading rather than repeated on every line
+  const libris = libraries.filter((l) => l.provider === "libris" && l.url);
   const rismPerson = composer.data?.links.find((l) => l.provider === "rism")?.url;
 
   return (
@@ -75,20 +100,35 @@ export function WorkPage({ id }: { id: string }) {
       <header className="detail-head">
         <p className="eyebrow">Work</p>
         <h1>{w.title}</h1>
-        {w.aliases.length > 0 && <p className="aliases muted">Also listed as {w.aliases.map((a) => `“${a}”`).join(", ")}</p>}
-        <p className="detail-meta">
-          {w.composer && (
-            <>
-              <Link href={composerPath(w.composer)}>{w.composer.name}</Link>
-              {lifespan(w.composer) && <span className="muted"> {lifespan(w.composer)}</span>}
-            </>
-          )}
-          {w.year && <span className="muted"> · {w.year}</span>}
-          {w.duration && <span className="muted"> · about {formatDuration(w.duration)}</span>}
-          {w.movements && w.movements > 1 && <span className="muted"> · {w.movements} movements</span>}
-          {w.era && <span className="badge">{w.era}</span>}
-          {w.score >= CORE_SCORE && <span className="badge badge-core">Core repertoire</span>}
-        </p>
+        {w.aliases.length > 0 && (
+          <p className="aliases muted">
+            Also listed as {(allAliases ? w.aliases : w.aliases.slice(0, ALIASES_SHOWN)).map((a) => `“${a}”`).join(", ")}
+            {w.aliases.length > ALIASES_SHOWN && (
+              <>
+                {" "}
+                <button className="link-button" onClick={() => setAllAliases(!allAliases)}>
+                  {allAliases ? "fewer" : `and ${w.aliases.length - ALIASES_SHOWN} more`}
+                </button>
+              </>
+            )}
+          </p>
+        )}
+        {(facts.length > 0 || workEra || w.score >= CORE_SCORE) && (
+          <p className="detail-meta work-facts">
+            {facts.length > 0 && <span>{facts.join(" · ")}</span>}
+            {workEra && <span className="badge">{workEra}</span>}
+            {w.score >= CORE_SCORE && <span className="badge badge-core">Core repertoire</span>}
+          </p>
+        )}
+        {w.composer && (
+          <Link className="composer-card" href={composerPath(w.composer)}>
+            <span className="eyebrow">Composer</span>
+            <span className="composer-card-name">{w.composer.name}</span>
+            {(lifespan(w.composer) || w.composer.era) && (
+              <span className="muted small">{[lifespan(w.composer), w.composer.era].filter(Boolean).join(" · ")}</span>
+            )}
+          </Link>
+        )}
       </header>
 
       <section className="detail-section">
@@ -96,9 +136,9 @@ export function WorkPage({ id }: { id: string }) {
         {scores.length > 0 && (
           <>
             <h3 className="subhead">Free online</h3>
-            <ul className="link-list big">
+            <ul className="link-list scores">
               {scores.map((l) => (
-                <LinkItem key={l.provider + l.ref} l={l} />
+                <ScoreLink key={l.provider + l.ref} l={l} />
               ))}
             </ul>
           </>
@@ -107,9 +147,25 @@ export function WorkPage({ id }: { id: string }) {
           <>
             <h3 className="subhead">In libraries</h3>
             <ul className="link-list">
-              {libraries.map((l) => (
-                <LinkItem key={l.provider + l.ref} l={l} />
-              ))}
+              {libris.length > 1 && (
+                <li>
+                  Borrow from Musik- och teaterbiblioteket, Stockholm
+                  <ul className="link-list nested">
+                    {libris.map((l) => (
+                      <li key={l.ref}>
+                        <a href={l.url!} target="_blank" rel="noreferrer">
+                          {l.label ?? "Catalogue record"}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              )}
+              {libraries
+                .filter((l) => libris.length < 2 || !libris.includes(l))
+                .map((l) => (
+                  <LinkItem key={l.provider + l.ref} l={l} />
+                ))}
             </ul>
             {w.copies > libraries.length && (
               <p className="muted small">

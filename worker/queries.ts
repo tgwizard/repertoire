@@ -148,9 +148,16 @@ const OWN_COLUMNS = "title composer aliases keys";
 
 /** Works a composer arranged: IMSLP's arrangers by the composer's name */
 const ARRANGED_BY_COMPOSER = "w.id IN (SELECT a.work_id FROM arrangements a WHERE a.arranger = (SELECT name FROM composers WHERE id = ?) COLLATE NOCASE)";
-/** A row's arrangements by a composer (ids are checked: [0-9a-z] only) */
-const arrangedByComposer = (id: string) => {
+/** A composer id to write into SQL: checked, [0-9a-z] only */
+const composerId = (id: string) => {
   if (!/^[0-9a-z]+$/.test(id)) throw new Error("Not a composer id");
+  return id;
+};
+/** How many composers the composer facet lists */
+const COMPOSER_FACETS = 300;
+/** A row's arrangements by a composer */
+const arrangedByComposer = (id: string) => {
+  composerId(id);
   return `(SELECT json_group_array(json_array(a.arranger, a.excerpt, a.lineup)) FROM arrangements a
     WHERE a.work_id = w.id AND a.arranger = (SELECT name FROM composers WHERE id = '${id}') COLLATE NOCASE) AS arranged`;
 };
@@ -394,6 +401,8 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
       return [...work, row].join(" AND ");
     };
     const none = (n: number) => Array(n).fill("NULL").join(", ");
+    // The picked composer is listed whatever their count, so the select can name them
+    const picked = q.composer ? `'${composerId(q.composer)}'` : null;
     const lengthSums = LENGTHS.map((l, i) => `SUM(${pass("length")} AND duration >= ${l.min * 60}${l.max ? ` AND duration < ${l.max * 60}` : ""}) AS length_${i}`);
     stmts.push(
       db
@@ -411,10 +420,17 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
            FROM m
            UNION ALL
            SELECT 'era', era, NULL, SUM(${pass("era")}), ${none(LENGTHS.length + 5)} FROM m GROUP BY era
-           UNION ALL
+           UNION ALL${
+             picked
+               ? `
+           SELECT 'composer', id, name, 0, ${none(LENGTHS.length + 5)} FROM composers WHERE id = ${picked} AND id NOT IN (SELECT cid FROM m WHERE cid IS NOT NULL)
+           UNION ALL`
+               : ""
+           }
            SELECT * FROM (
              SELECT 'composer', cid, cname, SUM(${pass("composer")}) AS n, ${none(LENGTHS.length + 5)}
-             FROM m WHERE cid IS NOT NULL GROUP BY cid HAVING n > 0 ORDER BY n DESC, MIN(csort) LIMIT 300
+             FROM m WHERE cid IS NOT NULL GROUP BY cid HAVING n > 0${picked ? ` OR cid = ${picked}` : ""}
+             ORDER BY ${picked ? `cid = ${picked} DESC, ` : ""}n DESC, MIN(csort) LIMIT ${COMPOSER_FACETS}
            )`,
         )
         .bind(...flagArgs, ...facetBaseArgs),

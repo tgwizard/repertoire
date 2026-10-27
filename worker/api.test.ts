@@ -71,6 +71,16 @@ test("filters, sorts and pages", async () => {
   const one = await get<WorksPage>(`/api/works?lineup=${QUARTET}&facets=1&composer=${all.facets!.composers[0]!.id}`);
   assert.ok(one.total < all.total);
   assert.deepEqual(one.facets!.composers, all.facets!.composers);
+  // The picked composer comes first, so the facet's limit never leaves them out
+  const last = all.facets!.composers.at(-1)!;
+  const lastPicked = await get<WorksPage>(`/api/works?lineup=${QUARTET}&facets=1&composer=${last.id}`);
+  assert.deepEqual(lastPicked.facets!.composers, [last, ...all.facets!.composers.slice(0, -1)]);
+  // A picked composer with nothing for this line-up is still named, with no works, first
+  const quintets = await get<WorksPage>(`/api/works?lineup=${WIND_QUINTET}&facets=1`);
+  const other = all.facets!.composers.find((c) => !quintets.facets!.composers.some((q) => q.id === c.id))!;
+  const none = await get<WorksPage>(`/api/works?lineup=${WIND_QUINTET}&facets=1&composer=${other.id}`);
+  assert.equal(none.total, 0);
+  assert.deepEqual(none.facets!.composers, [{ id: other.id, name: other.name, count: 0 }, ...quintets.facets!.composers]);
   // A composer's own list (no line-up) counts only them, not the whole dataset
   const own = await get<WorksPage>(`/api/works?composer=${all.facets!.composers[0]!.id}&facets=1`);
   assert.deepEqual(own.facets!.composers.map((c) => c.id), [all.facets!.composers[0]!.id]);

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, type CSSProperties, type ReactNode } from "react";
 import { finderPath, useApi } from "../lib/api";
 import { Link } from "../lib/router";
 import { FEEDBACK_MAILTO, REPO } from "../shared/paths";
@@ -7,6 +7,64 @@ import { CORE_SCORE, DATA_LICENSE, DATASETS_URL, ERAS, EXPORT_FILES, SIGNALS, SO
 const fmt = new Intl.NumberFormat("en");
 const n = (v: number | null | undefined) => (v === null || v === undefined ? "–" : fmt.format(v));
 const date = (iso: string | null | undefined) => (iso ? iso.slice(0, 10) : "–");
+const compact = new Intl.NumberFormat("en", { notation: "compact" });
+
+// The page's sections, for its contents
+const CONTENTS = [
+  ["dataset", "The dataset"],
+  ["whats-in-it", "What's in it"],
+  ["sources", "Sources"],
+  ["how-its-combined", "How it's combined"],
+  ["license", "License and reuse"],
+  ["downloads", "Downloads"],
+  ["api", "API"],
+  ["known-gaps", "Known gaps"],
+  ["by", "By"],
+] as const;
+
+/** A heading with a link to itself */
+function Heading({ level: H, id, children }: { level: "h2" | "h3"; id: string; children: ReactNode }) {
+  return (
+    <H id={id} className="anchored">
+      {children}
+      <a className="anchor" href={`#${id}`} aria-label="Link to this section">
+        #
+      </a>
+    </H>
+  );
+}
+
+// Long words, soft-hyphenated for narrow columns
+const SOFT: Record<string, string> = {
+  Medieval: "Medi\u00adeval",
+  Renaissance: "Renais\u00adsance",
+  Baroque: "Bar\u00adoque",
+  Classical: "Clas\u00adsical",
+  Romantic: "Roman\u00adtic",
+  "Early 20th century": "Early 20th cen\u00adtury",
+  Modern: "Mod\u00adern",
+  Unknown: "Un\u00adknown",
+};
+
+/** A column chart: one bar per item, its value above and its label below (and a note under that) */
+function Columns({ items }: { items: { key: string; label: string; value: number; note?: number }[] }) {
+  const max = Math.max(1, ...items.map((i) => i.value));
+  return (
+    <ul className="columns-chart" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
+      {items.map((i) => (
+        <li key={i.key} title={`${i.label}: ${n(i.value)} works${i.note !== undefined ? `, ${n(i.note)} line-ups` : ""}`}>
+          <span className="column-track">
+            <span className="column-value">{compact.format(i.value)}</span>
+            <span className="bar" style={{ "--h": i.value / max } as CSSProperties} />
+          </span>
+          <span className="column-label">{i.label}</span>
+          {i.note !== undefined && <span className="column-note muted">{compact.format(i.note)}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 const pct = (part: number, whole: number) => `${Math.round((100 * part) / Math.max(1, whole))}%`;
 
 
@@ -35,6 +93,11 @@ export function AboutPage() {
   useEffect(() => {
     document.title = "About · Repertoire Finder";
   }, []);
+  // A link to a section: go there once the sections the numbers fill in are drawn
+  const loaded = !!meta;
+  useEffect(() => {
+    if (loaded && location.hash) document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView();
+  }, [loaded]);
   const s = meta?.stats;
 
   return (
@@ -44,80 +107,90 @@ export function AboutPage() {
         <h1>Where this comes from</h1>
         <p>
           Repertoire Finder answers one question: what can <em>this</em> group play? You pick the players you have, and get the works written for
-          exactly that line-up, most established first, with links to free sheet music and to library copies when there are some. It combines
+          exactly that line-up, with links to free sheet music and to library copies when there are some. It combines
           nine open sources into one dataset, rebuilt regularly, and everything is open: the data, the code, and how they fit together.
         </p>
+        <nav className="contents" aria-labelledby="contents-label">
+          <p className="eyebrow" id="contents-label">
+            On this page
+          </p>
+          <ol>
+            {CONTENTS.map(([id, title]) => (
+              <li key={id}>
+                <a href={`#${id}`}>{title}</a>
+              </li>
+            ))}
+          </ol>
+        </nav>
       </header>
 
       {meta && (
         <section className="detail-section">
-          <h2>The dataset</h2>
+          <Heading level="h2" id="dataset">The dataset</Heading>
           <p>
-            Built <strong>{date(meta.builtAt)}</strong> (version <code>{meta.version}</code>):
+            Built {date(meta.builtAt)}. Version: <code>{meta.version}</code>.
           </p>
-          <dl className="stat-grid">
-            <div>
-              <dt>Works</dt>
-              <dd>{n(meta.works)}</dd>
-            </div>
-            <div>
-              <dt>Composers</dt>
-              <dd>{n(meta.composers)}</dd>
-            </div>
-            <div>
-              <dt>Line-ups</dt>
-              <dd>{n(meta.lineups)}</dd>
-            </div>
+          <ul className="stats">
+            <li>{n(meta.works)} works</li>
+            <li>{n(meta.composers)} composers</li>
+            <li>{n(meta.lineups)} line-ups</li>
             {s && (
               <>
-                <div>
-                  <dt>Core repertoire</dt>
-                  <dd>{n(s.core)}</dd>
-                </div>
-                <div>
-                  <dt>With free sheet music</dt>
-                  <dd>
-                    {n(s.free)} <span className="muted small">{pct(s.free, meta.works)}</span>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Only as arrangements</dt>
-                  <dd>{n(s.arrangementOnly)}</dd>
-                </div>
+                <li>{n(s.core)} works of core repertoire</li>
+                <li>
+                  {n(s.free)} with free sheet music ({pct(s.free, meta.works)})
+                </li>
+                <li>{n(s.arrangementOnly)} only as arrangements</li>
                 {s.orchestrations && (
-                  <div>
-                    <dt>Orchestral works with a known scoring</dt>
-                    <dd>
-                      {n(Object.values(s.orchestrations).reduce((a, b) => a + b, 0))}{" "}
-                      <span className="muted small">
-                        {(Object.entries(s.orchestrations) as [SourceId, number][]).map(([src, k]) => `${n(k)} from ${SOURCES[src].name}`).join(", ")}
-                        {s.orchestrationStatus?.confirmed !== undefined && `; ${n(s.orchestrationStatus.confirmed)} confirmed by two sources`}
-                      </span>
-                    </dd>
-                  </div>
+                  <li>
+                    {n(Object.values(s.orchestrations).reduce((a, b) => a + b, 0))} orchestral works with a known scoring
+                    <ul>
+                      {(Object.entries(s.orchestrations) as [SourceId, number][]).map(([src, k]) => (
+                        <li key={src}>
+                          {n(k)} from {SOURCES[src].name}
+                        </li>
+                      ))}
+                      {s.orchestrationStatus?.confirmed !== undefined && <li>{n(s.orchestrationStatus.confirmed)} confirmed by two sources</li>}
+                    </ul>
+                  </li>
                 )}
-                {s.durations !== undefined && (
-                  <div>
-                    <dt>With a duration</dt>
-                    <dd>{n(s.durations)}</dd>
-                  </div>
-                )}
+                {s.durations !== undefined && <li>{n(s.durations)} with a duration</li>}
                 {s.arrangements && (
-                  <div>
-                    <dt>Arrangements on IMSLP</dt>
-                    <dd>
-                      {n(s.arrangements.n)} <span className="muted small">by {n(s.arrangements.arrangers)} arrangers</span>
-                    </dd>
-                  </div>
+                  <li>
+                    {n(s.arrangements.n)} arrangements on IMSLP, by {n(s.arrangements.arrangers)} arrangers
+                  </li>
                 )}
               </>
             )}
-          </dl>
+          </ul>
+        </section>
+      )}
+
+      {s && meta && (
+        <section className="detail-section">
+          <Heading level="h2" id="whats-in-it">What's in it</Heading>
+          <Heading level="h3" id="by-era">By era</Heading>
+          <Columns
+            items={[...ERAS, "Unknown" as const].filter((e) => s.eras[e]).map((e) => ({ key: e, label: SOFT[e] ?? e, value: s.eras[e]! }))}
+          />
+          <Heading level="h3" id="by-players">By number of players</Heading>
+          <Columns
+            items={s.sizes.map((z) => ({ key: z.players, label: z.players === "1" ? "Solo" : z.players, value: z.works, note: z.lineups }))}
+          />
+          <p className="muted small">Works for each size of group; under each, how many different line-ups they're for.</p>
+          <Heading level="h3" id="common-lineups">Most common line-ups</Heading>
+          <ol className="top-lineups">
+            {s.topLineups.map((l) => (
+              <li key={l.key}>
+                <Link href={finderPath(l.key)}>{l.description}</Link> <span className="muted small">{n(l.works)}</span>
+              </li>
+            ))}
+          </ol>
         </section>
       )}
 
       <section className="detail-section">
-        <h2>Sources</h2>
+        <Heading level="h2" id="sources">Sources</Heading>
         <div className="table-wrap">
           <table className="about-table">
             <thead>
@@ -171,7 +244,7 @@ export function AboutPage() {
       </section>
 
       <section className="detail-section">
-        <h2>How it's combined</h2>
+        <Heading level="h2" id="how-its-combined">How it's combined</Heading>
         <ul className="prose-list">
           <li>
             <strong>Exact line-ups.</strong> A work is listed for a line-up only when a source says it is for exactly those players. Arrangements
@@ -203,73 +276,81 @@ export function AboutPage() {
         </ul>
       </section>
 
-      {s && meta && (
-        <section className="detail-section">
-          <h2>What's in it</h2>
-          <div className="about-columns">
-            <div>
-              <h3>By era</h3>
-              <ul className="bars">
-                {[...ERAS, "Unknown" as const]
-                  .filter((e) => s.eras[e])
-                  .map((e) => (
-                    <li key={e}>
-                      <span className="bar-label">{e}</span>
-                      <span className="bar" style={{ width: pct(s.eras[e]!, Math.max(...Object.values(s.eras).map((v) => v ?? 0))) }} />
-                      <span className="muted small">{n(s.eras[e])}</span>
-                    </li>
-                  ))}
-              </ul>
-            </div>
-            <div>
-              <h3>By number of players</h3>
-              <ul className="bars">
-                {s.sizes.map((z) => (
-                  <li key={z.players}>
-                    <span className="bar-label">{z.players === "1" ? "Solo" : z.players}</span>
-                    <span className="bar" style={{ width: pct(z.works, Math.max(...s.sizes.map((x) => x.works))) }} />
-                    <span className="muted small">
-                      {n(z.works)} works, {n(z.lineups)} line-ups
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-          <h3>Most common line-ups</h3>
-          <ol className="top-lineups">
-            {s.topLineups.map((l) => (
-              <li key={l.key}>
-                <Link href={finderPath(l.key)}>{l.description}</Link> <span className="muted small">{n(l.works)}</span>
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
-
       <section className="detail-section">
-        <h2>License and reuse</h2>
+        <Heading level="h2" id="license">License and reuse</Heading>
         <p>
           The dataset is licensed <a href={DATA_LICENSE.url}>{DATA_LICENSE.name}</a>, because it includes material from IMSLP and Wikipedia under
           that license; RISM's is CC BY 3.0, and data from Wikidata, Open Opus, MusicBrainz, LIBRIS and the GND is CC0. Mutopia is only
           linked to. If you reuse it, credit Repertoire Finder and those sources, and share
           alike. The code is <a href={`${REPO}/blob/main/LICENSE`}>MIT</a>. Sheet music is hosted by IMSLP, under each score's own terms.
         </p>
-        {meta && (
-          <p>
-            Take it with you: <a href={`${DATASETS_URL}/${meta.version}/${EXPORT_FILES.sqlite}`}>SQLite</a> or{" "}
-            <a href={`${DATASETS_URL}/${meta.version}/${EXPORT_FILES.csv}`}>CSV (zip)</a> downloads of every version, or the{" "}
-            <a href="/api">JSON API</a>. The <a href={`${REPO}/blob/main/docs/data.md`}>data documentation</a> describes the tables and how
-            they're built.
-          </p>
-        )}
+        <p>
+          To use it, <a href="#downloads">download it</a> or <a href="#api">query the API</a>.
+        </p>
         <p className="muted small">
           An independent project, not affiliated with any of these sources, which do the real work of collecting this knowledge.
         </p>
       </section>
 
       <section className="detail-section">
-        <h2>Known gaps</h2>
+        <Heading level="h2" id="downloads">Downloads</Heading>
+        <p>The whole dataset, {DATA_LICENSE.name} like the rest:</p>
+        {meta ? (
+          <ul className="prose-list">
+            <li>
+              <a href={`${DATASETS_URL}/${meta.version}/${EXPORT_FILES.sqlite}`}>SQLite database</a> (gzipped): every table, ready to query.
+            </li>
+            <li>
+              <a href={`${DATASETS_URL}/${meta.version}/${EXPORT_FILES.csv}`}>CSV files</a> (zip): one file per table, for spreadsheets and scripts.
+            </li>
+            <li>
+              Every version stays downloadable at <code>{DATASETS_URL}/&lt;version&gt;/</code>, with a{" "}
+              <a href={`${DATASETS_URL}/${meta.version}/manifest.json`}>manifest</a> of sizes and checksums;{" "}
+              <a href={`${DATASETS_URL}/latest.json`}>latest.json</a> names the newest.
+            </li>
+          </ul>
+        ) : (
+          <p className="muted">Loading…</p>
+        )}
+      </section>
+
+      <section className="detail-section">
+        <Heading level="h2" id="api">API</Heading>
+        <p>
+          JSON, free, no key, open to any site (CORS). Ids in it are permanent: a work or composer that's merged redirects, one that's withdrawn
+          says why.
+        </p>
+        <ul className="prose-list">
+          <li>
+            <a href="/api/meta">
+              <code>/api/meta</code>
+            </a>
+            : the dataset's version and numbers
+          </li>
+          <li>
+            <a href="/api/lineups">
+              <code>/api/lineups</code>
+            </a>
+            : every line-up, with how many works it has
+          </li>
+          <li>
+            <code>/api/works?lineup=…</code>: works for a line-up, with the finder's filters and sorts
+          </li>
+          <li>
+            <code>/api/works/&#123;id&#125;</code>, <code>/api/composers/&#123;id&#125;</code>: one work or composer
+          </li>
+          <li>
+            <code>/api/search?q=…</code>: works and composers matching a search
+          </li>
+        </ul>
+        <p>
+          <a href="/api">/api</a> lists every endpoint and parameter. The <a href={`${REPO}/blob/main/docs/data.md`}>data documentation</a>{" "}
+          describes the tables and how they're built.
+        </p>
+      </section>
+
+      <section className="detail-section">
+        <Heading level="h2" id="known-gaps">Known gaps</Heading>
         <ul className="prose-list">
           <li>
             Works still in copyright are only here when the GND, LIBRIS, Wikipedia, Wikidata or Open Opus know their exact line-up; many
@@ -287,7 +368,8 @@ export function AboutPage() {
       </section>
 
       <section className="detail-section">
-        <h2>Feedback welcome</h2>
+        <Heading level="h2" id="by">By</Heading>
+        <p>Built by Adam Renberg Tamm, with love, using AI.</p>
         <p>
           Found a wrong line-up, a duplicate, or a missing work? Tell me: open an issue on <a href={`${REPO}/issues`}>GitHub</a> or email{" "}
           <a href={FEEDBACK_MAILTO}>tgwizard@gmail.com</a>. The code is at <a href={REPO}>github.com/tgwizard/repertoire</a>.

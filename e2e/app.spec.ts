@@ -30,6 +30,20 @@ test("pick a preset: the line-up's works, most established first, and more on re
   noErrors();
 });
 
+test("a composer's name goes to their page; the filter button beside it narrows the list to them", async ({ page }) => {
+  await page.goto("/?i=flute,oboe,clarinet,bassoon,horn");
+  const first = works(page).first();
+  await expect(first).toContainText("Carl Nielsen");
+  await first.getByRole("button", { name: "Show only Carl Nielsen" }).click();
+  await expect(page).toHaveURL(/composer=/);
+  await expect(page.locator("#filter-composer")).toHaveClass(/filter-on/);
+  // Filtered to them, there's nothing more to narrow
+  await expect(works(page).first().getByRole("button", { name: "Show only Carl Nielsen" })).toHaveCount(0);
+  await works(page).first().getByRole("link", { name: "Carl Nielsen" }).click();
+  await expect(page).toHaveURL(/\/composer\//);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Carl Nielsen");
+});
+
 test("the logo starts over: no line-up, no search, top of the page; back restores", async ({ page }) => {
   await page.goto("/?i=flute,oboe,clarinet,bassoon,horn,piano&sub=1");
   await expect(works(page).first()).toBeVisible();
@@ -374,12 +388,15 @@ test("the API is cached at the edge and browsers", async ({ request }) => {
 test("about page: sources with numbers, license and how to give feedback", async ({ page }) => {
   const noErrors = watchErrors(page);
   await page.goto("/");
-  await page.locator(".footer").getByRole("link", { name: "About the data" }).click();
+  await page.locator(".footer").getByRole("link", { name: "About", exact: true }).click();
   await expect(page).toHaveURL(/\/about$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Where this comes from");
   const imslp = page.locator(".about-table tbody tr").filter({ hasText: "IMSLP" });
   await expect(imslp.locator("td").first()).toHaveText(/^\d{3},\d{3}$/);
-  await expect(page.locator(".stat-grid")).toContainText("Works");
+  await expect(page.locator(".stats")).toContainText("works");
+  await page.locator(".contents").getByRole("link", { name: "Downloads" }).click();
+  await expect(page).toHaveURL(/\/about#downloads$/);
+  await expect(page.getByRole("heading", { name: "Downloads" })).toBeInViewport();
   await expect(page.getByRole("link", { name: "tgwizard@gmail.com" })).toHaveAttribute("href", "mailto:tgwizard@gmail.com?subject=%5BRepertoire%20Feedback%5D%3A%20");
   await expect(page.getByRole("link", { name: "github.com/tgwizard/repertoire" })).toHaveAttribute("href", "https://github.com/tgwizard/repertoire");
   noErrors();

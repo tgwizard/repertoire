@@ -30,6 +30,8 @@ export function FilterControls({ filters, set, facets: f, sorts, before, arrange
   const composerNames = useRef(new Map<string, string>());
   for (const c of f?.composers ?? []) composerNames.current.set(c.id, c.name);
   const composerOptions = [...(f?.composers ?? [])];
+  // The picked composer comes back even with no works here: not one of those to pick from
+  const listed = composerOptions.filter((c) => c.count > 0).length;
   if (composer && !composerOptions.some((c) => c.id === composer))
     composerOptions.unshift({ id: composer, name: composerNames.current.get(composer) ?? "This composer", count: 0 });
 
@@ -89,8 +91,8 @@ export function FilterControls({ filters, set, facets: f, sorts, before, arrange
           <label className="filter-label" htmlFor="filter-composer">
             Composer
           </label>
-          <select id="filter-composer" value={composer} onChange={(e) => set({ composer: e.target.value })}>
-            <option value="">All composers{f ? ` (${fmt.format(f.composers.length)}${f.composers.length === 300 ? "+" : ""})` : ""}</option>
+          <select id="filter-composer" className={composer ? "filter-on" : undefined} value={composer} onChange={(e) => set({ composer: e.target.value })}>
+            <option value="">All composers{f ? ` (${fmt.format(listed)}${listed >= 300 ? "+" : ""})` : ""}</option>
             {composerOptions.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name} ({c.count})
@@ -102,7 +104,7 @@ export function FilterControls({ filters, set, facets: f, sorts, before, arrange
           <label className="filter-label" htmlFor="filter-length">
             Length
           </label>
-          <select id="filter-length" value={length} onChange={(e) => set({ length: e.target.value })}>
+          <select id="filter-length" className={length ? "filter-on" : undefined} value={length} onChange={(e) => set({ length: e.target.value })}>
             <option value="">Any length</option>
             {LENGTHS.map((l, i) => (
               <option key={l.label} value={lengthKey(l)}>

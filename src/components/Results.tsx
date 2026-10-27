@@ -165,14 +165,14 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
                 </label>
                 {smaller && (
                   <>
-                    <select value={minPlayers} onChange={(e) => set({ minPlayers: Number(e.target.value), within: "" })} aria-label="Smallest group">
+                    <select className={minPlayers > 1 ? "filter-on" : undefined} value={minPlayers} onChange={(e) => set({ minPlayers: Number(e.target.value), within: "" })} aria-label="Smallest group">
                       {Array.from({ length: Math.max(1, players - 1) }, (_, i) => i + 1).map((n) => (
                         <option key={n} value={n}>
                           {n === 1 ? "Solos and up" : `${n}+ players`}
                         </option>
                       ))}
                     </select>
-                    <select value={within} onChange={(e) => set({ within: e.target.value })} aria-label="Group">
+                    <select className={within ? "filter-on" : undefined} value={within} onChange={(e) => set({ within: e.target.value })} aria-label="Group">
                       <option value="">All groups{f?.lineups.length ? ` (${f.lineups.length})` : ""}</option>
                       {(f?.lineups ?? []).map((l) => (
                         <option key={l.key} value={l.key}>
@@ -303,7 +303,7 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
 
       <div className={busy && works.length ? "works-wrap stale" : "works-wrap"}>
         {works.length > 0 && <LoadingStatus busy={busy} over />}
-        <WorkList works={works} lineup={lineup} onComposer={(id) => set({ composer: id })} groupByPlayers={smaller && !within && sorting.sort === "players" ? players : undefined} />
+        <WorkList works={works} lineup={lineup} onComposer={(id) => set({ composer: id })} composer={composer} groupByPlayers={smaller && !within && sorting.sort === "players" ? players : undefined} />
       </div>
       {!works.length && <LoadingStatus busy={busy} over={false} label="Loading…" />}
       {hasMore && (
