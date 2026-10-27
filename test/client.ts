@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { DATASET_PATH } from "../crawler/build.ts";
 import { handleApi } from "../worker/api.ts";
-import { sqliteDb } from "./d1.ts";
+import { sqliteDb } from "../crawler/d1.ts";
 
 export const REMOTE = process.env.DATA_URL?.replace(/\/$/, "");
 

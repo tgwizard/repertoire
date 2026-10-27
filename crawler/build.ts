@@ -28,6 +28,8 @@ import {
   type SourceId,
 } from "../src/shared/data.ts";
 import { INDEXES, SCHEMA_VERSION, TABLES } from "./db.ts";
+import { sqliteDb } from "./d1.ts";
+import { listWorks, PRECOMPUTED_FACETS_MIN } from "../worker/queries.ts";
 import { openOpusEnsemble, titleFitsPlayers, WIKIDATA_ENSEMBLES, WIKIPEDIA_CATEGORIES, wikidataInstrumentsFit } from "./ensembles.ts";
 import { CACHE_DIR, readStage } from "./http.ts";
 import { assignIds, NO_PREVIOUS, type PreviousIds } from "./ids.ts";
@@ -997,6 +999,26 @@ function datasetStats(db: DatabaseSync): DatasetStats {
   };
 }
 
+/**
+ * Counts ahead the facets of every big line-up's unfiltered list, with and without
+ * arrangements, by the API's own code (worker/queries.ts), so they're what it would count.
+ */
+export async function precomputeFacets(path: string, min = PRECOMPUTED_FACETS_MIN): Promise<number> {
+  const db = new DatabaseSync(path);
+  const api = sqliteDb(db);
+  const insert = db.prepare("INSERT INTO lineup_facets VALUES (?, ?, ?, ?)");
+  const big = (db.prepare("SELECT key FROM lineups WHERE original + arrangements >= ? ORDER BY key").all(min) as { key: string }[]).map((r) => r.key);
+  for (const lineup of big) {
+    for (const arrangements of [false, true]) {
+      const page = await listWorks(api, null, { lineup, arrangements, facets: true, limit: 1 });
+      insert.run(lineup, arrangements ? 1 : 0, page.total, JSON.stringify(page.facets));
+    }
+  }
+  db.prepare("INSERT OR REPLACE INTO meta VALUES ('facets_min', ?)").run(String(min));
+  db.close();
+  return big.length;
+}
+
 /** Anchors and redirects of works and composers in a previous dataset. */
 export function readPrevious(path: string): Previous | null {
   if (!existsSync(path)) return null;
@@ -1026,6 +1048,8 @@ export async function buildDataset(): Promise<BuildResult> {
   const next = join(BUILD_DIR, "repertoire.next.sqlite");
   await rm(next, { force: true });
   const result = build(input, next, previous ?? NONE);
+  const precomputed = await precomputeFacets(next);
+  console.log(`Facets precomputed for ${precomputed} big line-ups`);
   if (previous) await rename(DATASET_PATH, PREVIOUS_PATH);
   await rename(next, DATASET_PATH);
   const { meta } = result;

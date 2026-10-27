@@ -32,6 +32,8 @@ A new database per version, rather than updating one in place, means the site sw
 
 API responses and rendered pages are cached at Cloudflare's edge for a week and in browsers for five minutes. The edge cache key includes the dataset version and a build id, and the app sends its build id with every API request, so neither the edge nor a browser hands new code a response made for the last deploy's (that once crashed the finder), and nothing needs purging. Most requests never reach D1. The dev server caches nothing.
 
+Uncached, a list is one batch: its page (ranked, straight from the `scorings_rank` index, so the top 50 of a 60k-work line-up cost no more than of a small one), and its total and facets. A big line-up's unfiltered facets are precomputed (`lineup_facets`); otherwise one pass over the line-up marks, per work, which filters it passes, and every count comes from that pass. Other sorts (oldest first, by title) still sort the whole list.
+
 ## Local development
 
 `npm run dev` runs everything locally through the Cloudflare Vite plugin: the app, the Worker and a local D1. Local D1 is a SQLite file under `.cloudflare/state/`; `crawler/local.ts` (`npm run data:local`, also run by `data:pull`) puts the current dataset there. Nothing in development touches production.

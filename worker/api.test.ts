@@ -1,10 +1,12 @@
 // The API on the miniature dataset: endpoints, parameters, errors and redirects.
 
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import { after, test } from "node:test";
 import type { ComposerDetail, LineupsIndex, Meta, SearchResults, WorkDetail, WorksPage } from "../src/shared/data.ts";
-import { sqliteDb } from "../test/d1.ts";
+import { sqliteDb } from "../crawler/d1.ts";
 import { buildFixture } from "../test/fixtures.ts";
+import { precomputeFacets } from "../crawler/build.ts";
 import { handleApi, resetCaches } from "./api.ts";
 
 const { path } = buildFixture(true);
@@ -160,6 +162,27 @@ test("searching without a line-up: best matches first, with filters and the line
     (await get<WorksPage>(`/api/works?lineup=${QUARTET}&sort=relevance`)).works.map((w) => w.id),
     (await get<WorksPage>(`/api/works?lineup=${QUARTET}`)).works.map((w) => w.id),
   );
+});
+
+test("a big line-up's unfiltered facets come precomputed, the same as counted", async () => {
+  const { path: copy } = buildFixture(true);
+  await precomputeFacets(copy, 1);
+  const pre = sqliteDb(copy);
+  const ask = async (d: typeof db, q: string) => (await (await handleApi(new Request(`http://test/api/works?${q}`), d)).json()) as WorksPage;
+  for (const q of [`lineup=${QUARTET}&facets=1`, `lineup=${QUARTET}&facets=1&arrangements=1`, "lineup=orchestra&facets=1"]) {
+    resetCaches();
+    const counted = await ask(db, q);
+    resetCaches();
+    assert.deepEqual(await ask(pre, q), counted, q);
+  }
+  // And they are what's read (not counted again)
+  const w = new DatabaseSync(copy);
+  w.prepare("UPDATE lineup_facets SET total = 999 WHERE lineup = ? AND arrangements = 0").run(QUARTET);
+  w.close();
+  resetCaches();
+  assert.equal((await ask(pre, `lineup=${QUARTET}&facets=1`)).total, 999);
+  resetCaches();
+  pre.close();
 });
 
 test("duration: filters and sort", async () => {

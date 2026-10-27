@@ -2,7 +2,7 @@
 // published as the SQLite download and loaded into Cloudflare D1, which the Worker
 // queries. Comments here are the documentation of the downloads too.
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const TABLES = `
 -- Dataset version, build time, counts, schema version and stats (JSON)
@@ -108,6 +108,16 @@ CREATE TABLE links (
   PRIMARY KEY (entity, entity_id, provider, ref)
 ) WITHOUT ROWID;
 
+-- A big line-up's list, unfiltered, counted ahead (the API's facets and total, as JSON),
+-- so its first view needn't count tens of thousands of works
+CREATE TABLE lineup_facets (
+  lineup TEXT NOT NULL REFERENCES lineups (key),
+  arrangements INTEGER NOT NULL,      -- 1 with arrangements listed too
+  total INTEGER NOT NULL,
+  facets TEXT NOT NULL,
+  PRIMARY KEY (lineup, arrangements)
+) WITHOUT ROWID;
+
 -- Ids of works and composers that were merged into another
 CREATE TABLE redirects (
   entity TEXT NOT NULL,
@@ -130,4 +140,4 @@ CREATE UNIQUE INDEX links_ref ON links (entity, provider, ref);
 `;
 
 /** Tables in the downloads and in D1, in dependency order (FTS tables are rebuilt from these). */
-export const DATA_TABLES = ["meta", "sources", "composers", "works", "lineups", "scorings", "orchestrations", "links", "redirects"] as const;
+export const DATA_TABLES = ["meta", "sources", "composers", "works", "lineups", "scorings", "orchestrations", "lineup_facets", "links", "redirects"] as const;

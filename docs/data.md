@@ -75,6 +75,7 @@ One SQLite database, the same in the downloads and in D1. Its tables (columns ar
 | `scorings` | which works are for which line-ups, original or arrangement, and which sources say so |
 | `orchestrations` | an orchestral work's scoring in the shorthand, its instruments, players per section (auxiliaries counted in their section) for "can our orchestra play it", and where it was read |
 | `links` | where to find works and composers: free sheet music (IMSLP, Mutopia), library copies (LIBRIS, RISM), articles, database records (Wikidata, GND, MusicBrainz), by provider and the provider's own id |
+| `lineup_facets` | for line-ups of 500 works or more, the unfiltered list's facets and total, counted ahead by the API's own code, so a big line-up's first view needn't count |
 | `redirects` | ids merged into others |
 | `sources` | each source's fetch time, records pulled, matched and added, and license |
 | `meta` | version, build time, counts, stats |

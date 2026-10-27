@@ -11,6 +11,8 @@ import { SCHEMA_VERSION } from "../../crawler/db.ts";
 import { ID_PATTERN } from "../../crawler/ids.ts";
 import { describe, ensembleKey, parseEnsembleKey, playerCount } from "../../src/lib/instrumentation.ts";
 import { formatOrchestration, LABELS, orchestraColumns } from "../../src/lib/orchestration.ts";
+import { sqliteDb } from "../../crawler/d1.ts";
+import { listWorks, PRECOMPUTED_FACETS_MIN } from "../../worker/queries.ts";
 import { ERAS, PROVIDERS, score, SIGNALS, type ProviderId, type Signal } from "../../src/shared/data.ts";
 
 if (!existsSync(DATASET_PATH)) throw new Error(`No dataset at ${DATASET_PATH}: run npm run index or npm run data:pull`);
@@ -121,6 +123,23 @@ test("orchestral scorings: for orchestral works, whole orchestras, columns as th
   }
   const n = one("SELECT COUNT(*) AS n FROM orchestrations").n;
   assert.ok(n > 4_000, `only ${n} orchestral scorings`);
+});
+
+test("precomputed facets are what the API would count, for the big line-ups", async () => {
+  assert.equal(Number(meta.facets_min), PRECOMPUTED_FACETS_MIN);
+  const big = all(`SELECT key FROM lineups WHERE original + arrangements >= ${PRECOMPUTED_FACETS_MIN}`).map((r) => r.key);
+  assert.equal(one("SELECT COUNT(*) AS n FROM lineup_facets").n, big.length * 2);
+  // The biggest, and a spread of the rest
+  const sample = [...all(`SELECT key FROM lineups WHERE original + arrangements >= ${PRECOMPUTED_FACETS_MIN} ORDER BY original DESC LIMIT 3`).map((r) => r.key), ...big.filter((_, i) => i % 25 === 0)];
+  const api = sqliteDb(DATASET_PATH);
+  for (const lineup of sample) {
+    for (const arrangements of [0, 1]) {
+      const stored = one(`SELECT total, facets FROM lineup_facets WHERE lineup = '${lineup.replaceAll("'", "''")}' AND arrangements = ${arrangements}`);
+      const page = await listWorks(api, null, { lineup, arrangements: !!arrangements, facets: true, limit: 1 });
+      assert.deepEqual([stored.total, JSON.parse(stored.facets)], [page.total, page.facets], `${lineup} ${arrangements}`);
+    }
+  }
+  api.close();
 });
 
 test("durations and movements are plausible", () => {

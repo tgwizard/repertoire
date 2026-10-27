@@ -265,6 +265,9 @@ export interface SearchResults {
 export interface LineupsIndex {
   version: string;
   lineups: Record<string, [number, number]>;
+  /** Line-ups with at least this many works (originals and arrangements) have their
+   * unfiltered facets precomputed */
+  facetsMin?: number;
 }
 
 export interface SourceStats {

@@ -11,7 +11,10 @@ import { test } from "node:test";
 import { gunzipSync } from "node:zlib";
 import { EXPORT_FILES } from "../src/shared/data.ts";
 import { buildFixture } from "../test/fixtures.ts";
+import { precomputeFacets } from "./build.ts";
+import { sqliteDb } from "./d1.ts";
 import { DATA_TABLES } from "./db.ts";
+import { listWorks } from "../worker/queries.ts";
 import { writeExports } from "./export.ts";
 import { sqlDump } from "./sqldump.ts";
 import { unzip } from "./zip.ts";
@@ -99,6 +102,19 @@ test("orchestral scoring: from IMSLP's parts, else RISM's copies; only for whole
     [work("String Quartet No.62, Op.76 No.3"), work("Symphony No.1, Op.68"), work("Clarinet Quintet, Op.115")].map((w) => [w.duration, w.movements]),
     [[1200, 4], [2700, 4], [null, null]],
   );
+});
+
+test("precomputed facets are what the API would count", async () => {
+  const { path: copy } = buildFixture();
+  const n = await precomputeFacets(copy, 1); // every line-up, however small
+  const fresh = sqliteDb(copy);
+  const stored = rows(new DatabaseSync(copy, { readOnly: true }), "SELECT * FROM lineup_facets ORDER BY lineup, arrangements");
+  assert.equal(stored.length, n * 2);
+  for (const r of stored) {
+    const page = await listWorks(fresh, null, { lineup: r.lineup, arrangements: !!r.arrangements, facets: true, limit: 1 });
+    assert.deepEqual([r.total, JSON.parse(r.facets)], [page.total, page.facets], `${r.lineup} ${r.arrangements}`);
+  }
+  fresh.close();
 });
 
 test("works IMSLP lacks come in when a source states an exact line-up", () => {

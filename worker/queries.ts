@@ -58,8 +58,16 @@ export async function getMeta(db: Db): Promise<Meta> {
 }
 
 export async function getLineups(db: Db, version: string): Promise<LineupsIndex> {
-  const { results } = await db.prepare("SELECT key, original, arrangements FROM lineups").all<Row>();
-  return { version, lineups: Object.fromEntries(results.map((r) => [r.key, [r.original, r.arrangements]])) };
+  const [lineups, min] = await db.batch<Row>([
+    db.prepare("SELECT key, original, arrangements FROM lineups"),
+    db.prepare("SELECT value FROM meta WHERE key = 'facets_min'"),
+  ]);
+  const facetsMin = Number(min!.results[0]?.value);
+  return {
+    version,
+    lineups: Object.fromEntries(lineups!.results.map((r) => [r.key, [r.original, r.arrangements]])),
+    ...(facetsMin > 0 && { facetsMin }),
+  };
 }
 
 export async function getLineup(db: Db, key: string) {
@@ -141,8 +149,8 @@ function toSummary(r: Row): WorkSummary {
 // Each sort's natural direction, and its ORDER BY with the main key in a given direction.
 // Works without a year, composer or duration stay last either way.
 const ORDER: Record<WorkSort, [SortOrder, (d: string) => string]> = {
-  rank: ["desc", (d) => `s.arrangement, w.score ${d}, w.n`],
-  players: ["desc", (d) => `players ${d}, s.arrangement, w.score DESC, w.n`],
+  rank: ["desc", (d) => `s.arrangement, s.score ${d}, s.work_id`],
+  players: ["desc", (d) => `players ${d}, s.arrangement, s.score DESC, s.work_id`],
   chronological: ["asc", (d) => `COALESCE(w.year, c.born + 35) IS NULL, COALESCE(w.year, c.born + 35) ${d}, w.score DESC, w.n`],
   composer: ["asc", (d) => `c.sort_name IS NULL, c.sort_name COLLATE NOCASE ${d}, w.title COLLATE NOCASE, w.n`],
   title: ["asc", (d) => `w.title COLLATE NOCASE ${d}, w.n`],
@@ -154,6 +162,10 @@ const ORDER: Record<WorkSort, [SortOrder, (d: string) => string]> = {
 /** Rows listed for a line-up with an orchestra in it ("orchestra*2", "voices with orchestra" too) */
 const ORCHESTRAL = "s.lineup LIKE '%orchestra%'";
 
+/** Line-ups this big have their unfiltered facets precomputed by the build (lineup_facets;
+ * the dataset's meta says which threshold it used) */
+export const PRECOMPUTED_FACETS_MIN = 500;
+
 export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery): Promise<WorksPage> {
   const limit = Math.min(Math.max(q.limit ?? 50, 1), 200);
   const offset = Math.min(Math.max(q.offset ?? 0, 0), 100_000);
@@ -164,7 +176,8 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
   const dir = (q.order ?? natural) === "desc" ? "DESC" : "ASC";
 
   // Base: which works are in the list at all. Searching without a line-up, the search
-  // belongs to it: facets then group only the matches, never the whole dataset.
+  // belongs to it, and on a composer's own page the composer: facets then group only
+  // those works, never the whole dataset.
   const base: string[] = [];
   const baseArgs: unknown[] = [];
   const MATCHES = "w.n IN (SELECT rowid FROM works_fts WHERE works_fts MATCH ?)";
@@ -184,12 +197,17 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
     base.push(MATCHES);
     baseArgs.push(fts);
   }
+  const ownPage = q.composer && !q.lineup && !fts;
+  if (ownPage) {
+    base.push("w.composer_id = ?");
+    baseArgs.push(q.composer);
+  }
 
   // Filters on top. Each facet counts with all the others applied, but not its own, so
   // its numbers say what picking it would give.
   type Filter = { key: "composer" | "era" | "length" | "orchestra" | "show" | "q"; sql: string; args: unknown[] };
   const filters: Filter[] = [];
-  if (q.composer) filters.push({ key: "composer", sql: "w.composer_id = ?", args: [q.composer] });
+  if (q.composer && !ownPage) filters.push({ key: "composer", sql: "w.composer_id = ?", args: [q.composer] });
   if (q.eras?.length) {
     const known = q.eras.filter((e) => (ERAS as readonly string[]).includes(e));
     const parts: string[] = [];
@@ -212,7 +230,7 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
     lengthArgs.push(q.maxDuration * 60);
   }
   if (q.unknownDuration) length.push("w.duration IS NULL");
-  if (length.length) filters.push({ key: "length", sql: length.join(" AND "), args: lengthArgs });
+  if (length.length) filters.push({ key: "length", sql: `(${length.join(" AND ")})`, args: lengthArgs });
   // An orchestra to fit: rows for an orchestral line-up need a scoring that fits; string
   // orchestra works need strings; anything else (a soloist's part) is fine as it is.
   if (q.orchestra) {
@@ -230,94 +248,113 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
   if (fts && !searching) filters.push({ key: "q", sql: MATCHES, args: [fts] });
 
   const cond = (c: string[]) => `WHERE ${c.join(" AND ")}`;
-  /** The filters but one, as SQL and its arguments; the orchestrations join if needed */
-  const applied = (except?: Filter["key"]) => {
-    const fs = filters.filter((f) => f.key !== except);
-    return {
-      sql: fs.length ? fs.map((f) => f.sql).join(" AND ") : "1",
-      args: fs.flatMap((f) => f.args),
-      from: fs.some((f) => f.key === "orchestra") ? FROM : CORE,
-    };
-  };
-  const all = applied();
-  const where = [...base, all.sql];
-  const args = [...baseArgs, ...all.args];
+  const orch = filters.some((f) => f.key === "orchestra");
+  const where = [...base, ...filters.map((f) => f.sql)];
+  const args = [...baseArgs, ...filters.flatMap((f) => f.args)];
 
-  // With smaller groups a work can be listed for several of them: keep the largest.
+  // The page. Ranked, a line-up's works come straight from the scorings_rank index
+  // (s.score is the work's score), in order, without sorting them all.
   const relevance = sort === "relevance";
   const rowsFrom = relevance ? `${FROM} JOIN (SELECT rowid, rank FROM works_fts WHERE works_fts MATCH ? AND rank MATCH 'bm25(10.0, 6.0, 4.0, 8.0)') f ON f.rowid = w.n` : FROM;
+  // With smaller groups a work can be listed for several of them: keep the largest.
   const select = multi
     ? `SELECT ${SUMMARY.replace("s.players", "MAX(s.players) AS players")} ${rowsFrom} ${cond(where)} GROUP BY s.work_id`
     : `SELECT ${SUMMARY} ${rowsFrom} ${cond(where)}`;
-  const stmts = [
-    db.prepare(`${select} ORDER BY ${orderBy(dir)} LIMIT ? OFFSET ?`).bind(...(relevance ? [fts] : []), ...args, limit, offset),
-    db.prepare(`SELECT COUNT(DISTINCT s.work_id) AS n ${all.from} ${cond(where)}`).bind(...args),
-  ];
-  if (q.facets) {
-    // Every era the line-up has (so the chips stay put), counted with the other filters
-    const era = applied("era");
-    // A composer's own page (no line-up, no search) lists just them: listing every
-    // composer would group the whole dataset.
-    const composer = q.lineup || fts ? applied("composer") : all;
-    const show = applied("show");
-    const len = applied("length");
+  const stmts = [db.prepare(`${select} ORDER BY ${orderBy(dir)} LIMIT ? OFFSET ?`).bind(...(relevance ? [fts] : []), ...args, limit, offset)];
+
+  // The total and facets. A big line-up, unfiltered, has them precomputed; otherwise one
+  // pass over the base list marks, per work, which filters it passes, and every count
+  // comes from that (rather than a pass per facet).
+  const entry = q.lineup && index?.lineups[q.lineup];
+  const precomputed = !!(q.facets && q.lineup && !multi && !filters.length && entry && index?.facetsMin && entry[0] + entry[1] >= index.facetsMin);
+  if (precomputed) {
+    stmts.push(db.prepare("SELECT total, facets FROM lineup_facets WHERE lineup = ? AND arrangements = ?").bind(q.lineup, q.arrangements ? 1 : 0));
+  } else if (q.facets) {
+    const flags = filters.map((f) => `MAX(${f.sql}) AS f_${f.key}`);
+    if (q.orchestra) flags.push(`MAX(${ORCHESTRAL} AND o.work_id IS NULL) AS unscored`);
+    const pass = (except?: Filter["key"]) => filters.filter((f) => f.key !== except).map((f) => `f_${f.key}`).join(" AND ") || "1";
+    const none = (n: number) => Array(n).fill("NULL").join(", ");
+    const lengthSums = LENGTHS.map((l, i) => `SUM(${pass("length")} AND duration >= ${l.min * 60}${l.max ? ` AND duration < ${l.max * 60}` : ""}) AS length_${i}`);
     stmts.push(
       db
-        .prepare(`SELECT w.era AS era, COUNT(DISTINCT CASE WHEN ${era.sql} THEN w.id END) AS n ${era.from} ${cond(base)} GROUP BY w.era`)
-        .bind(...era.args, ...baseArgs),
-      db
-        .prepare(`SELECT c.id AS id, c.name AS name, COUNT(DISTINCT w.id) AS n ${composer.from} ${cond([...base, composer.sql, "c.id IS NOT NULL"])} GROUP BY c.id ORDER BY n DESC, c.sort_name LIMIT 300`)
-        .bind(...baseArgs, ...composer.args),
-      db
-        .prepare(`SELECT SUM(score >= ${CORE_SCORE}) AS core, SUM(free) AS free FROM (SELECT DISTINCT w.id, w.score, w.free ${show.from} ${cond([...base, show.sql])})`)
-        .bind(...baseArgs, ...show.args),
+        .prepare(
+          `WITH m AS MATERIALIZED (
+             SELECT w.id AS id, w.era AS era, c.id AS cid, c.name AS cname, c.sort_name AS csort, w.score AS score, w.free AS free, w.duration AS duration
+             ${flags.map((f) => `, ${f}`).join("")}
+             ${orch || q.orchestra ? FROM : CORE} ${cond(base)} GROUP BY w.id
+           )
+           SELECT 'total' AS kind, NULL AS key, NULL AS name, SUM(${pass()}) AS n,
+             SUM(${pass("show")} AND score >= ${CORE_SCORE}) AS core, SUM(${pass("show")} AND free) AS free,
+             SUM(${pass("length")} AND duration IS NULL) AS unknown_length, ${lengthSums.join(", ")},
+             ${q.orchestra ? `SUM(${pass("orchestra")} AND unscored)` : "NULL"} AS unscored
+           FROM m
+           UNION ALL
+           SELECT 'era', era, NULL, SUM(${pass("era")}), ${none(LENGTHS.length + 4)} FROM m GROUP BY era
+           UNION ALL
+           SELECT * FROM (
+             SELECT 'composer', cid, cname, SUM(${pass("composer")}) AS n, ${none(LENGTHS.length + 4)}
+             FROM m WHERE cid IS NOT NULL GROUP BY cid HAVING n > 0 ORDER BY n DESC, MIN(csort) LIMIT 300
+           )`,
+        )
+        .bind(...filters.flatMap((f) => f.args), ...baseArgs),
+    );
+  } else if (!multi && !filters.length && q.lineup) {
+    stmts.push(db.prepare(`SELECT COUNT(*) AS n FROM scorings s ${cond(base)}`).bind(...baseArgs));
+  } else {
+    stmts.push(db.prepare(`SELECT COUNT(DISTINCT s.work_id) AS n ${orch ? FROM : CORE} ${cond(where)}`).bind(...args));
+  }
+  if (q.facets && searching) {
+    // The line-ups the matches are for: every one a work is listed for, not only its main
+    const lineupBase = base.filter((c) => c !== "s.lineup = w.lineup");
+    stmts.push(
       db
         .prepare(
-          `SELECT SUM(duration IS NULL) AS unknown_length,
-           ${LENGTHS.map((l, i) => `SUM(duration >= ${l.min * 60}${l.max ? ` AND duration < ${l.max * 60}` : ""}) AS length_${i}`).join(", ")}
-           FROM (SELECT DISTINCT w.id, w.duration ${len.from} ${cond([...base, len.sql])})`,
+          `SELECT s.lineup AS key, l.description AS description, l.players AS players, COUNT(DISTINCT s.work_id) AS n ${orch ? FROM : CORE} JOIN lineups l ON l.key = s.lineup ${cond([...lineupBase, ...filters.map((f) => f.sql)])} GROUP BY s.lineup ORDER BY n DESC, l.players LIMIT 60`,
         )
-        .bind(...baseArgs, ...len.args),
+        .bind(...baseArgs, ...filters.flatMap((f) => f.args)),
     );
-    if (searching) {
-      // The line-ups the matches are for: every one a work is listed for, not only its main
-      const lineupBase = base.filter((c) => c !== "s.lineup = w.lineup");
-      stmts.push(
-        db
-          .prepare(
-            `SELECT s.lineup AS key, l.description AS description, l.players AS players, COUNT(DISTINCT s.work_id) AS n ${all.from} JOIN lineups l ON l.key = s.lineup ${cond([...lineupBase, all.sql])} GROUP BY s.lineup ORDER BY n DESC, l.players LIMIT 60`,
-          )
-          .bind(...baseArgs, ...all.args),
-      );
-    } else if (multi) {
-      stmts.push(
-        db
-          .prepare(
-            `SELECT s.lineup AS key, l.description AS description, l.players AS players, COUNT(*) AS n ${all.from} JOIN lineups l ON l.key = s.lineup ${cond(where)} GROUP BY s.lineup ORDER BY l.players DESC, n DESC LIMIT 200`,
-          )
-          .bind(...args),
-      );
-    }
+  } else if (q.facets && multi) {
+    stmts.push(
+      db
+        .prepare(
+          `SELECT s.lineup AS key, l.description AS description, l.players AS players, COUNT(*) AS n ${orch ? FROM : CORE} JOIN lineups l ON l.key = s.lineup ${cond(where)} GROUP BY s.lineup ORDER BY l.players DESC, n DESC LIMIT 200`,
+        )
+        .bind(...args),
+    );
   }
-  if (q.orchestra) {
-    const other = applied("orchestra");
-    stmts.push(db.prepare(`SELECT COUNT(DISTINCT s.work_id) AS n ${FROM} ${cond([...base, other.sql, ORCHESTRAL, "o.work_id IS NULL"])}`).bind(...baseArgs, ...other.args));
+
+  // Without facets, the orchestral works left out for want of a scoring are counted alone
+  const unscoredAlone = !!q.orchestra && !q.facets;
+  if (unscoredAlone) {
+    const other = filters.filter((f) => f.key !== "orchestra");
+    stmts.push(
+      db
+        .prepare(`SELECT COUNT(DISTINCT s.work_id) AS n ${FROM} ${cond([...base, ...other.map((f) => f.sql), ORCHESTRAL, "o.work_id IS NULL"])}`)
+        .bind(...baseArgs, ...other.flatMap((f) => f.args)),
+    );
   }
   const results = await db.batch<Row>(stmts);
-  const unscored = q.orchestra ? results.pop()!.results[0]?.n : undefined;
-  const [rows, count, eras, composers, shows, lengths, lineups] = results;
-  let facets: Facets | null = null;
-  if (q.facets) {
-    facets = {
-      eras: Object.fromEntries(eras!.results.map((r) => [r.era ?? "Unknown", r.n])),
-      composers: composers!.results.map((r) => ({ id: r.id, name: r.name, count: r.n })),
-      lineups: (lineups?.results ?? []).map((r) => ({ key: r.key, description: r.description, players: r.players, count: r.n })),
-      core: shows!.results[0]?.core ?? 0,
-      free: shows!.results[0]?.free ?? 0,
-      lengths: { known: LENGTHS.map((_, i) => lengths!.results[0]?.[`length_${i}`] ?? 0), unknown: lengths!.results[0]?.unknown_length ?? 0 },
-    };
+  const unscored = unscoredAlone ? results.pop()!.results[0]?.n : undefined;
+  const [rows, counted, lineups] = results;
+  const works = rows!.results.map(toSummary);
+  if (precomputed) {
+    const r = counted!.results[0];
+    // Not there (an older dataset): count after all
+    if (!r) return listWorks(db, null, q);
+    return { total: r.total, offset, works, facets: JSON.parse(r.facets) };
   }
-  return { total: count!.results[0]?.n ?? 0, offset, works: rows!.results.map(toSummary), facets, ...(unscored !== undefined && { unscored }) };
+  if (!q.facets) return { total: counted!.results[0]?.n ?? 0, offset, works, facets: null, ...(unscored !== undefined && { unscored }) };
+  const out = counted!.results;
+  const totals = out.find((r) => r.kind === "total")!;
+  const facets: Facets = {
+    eras: Object.fromEntries(out.filter((r) => r.kind === "era").map((r) => [r.key ?? "Unknown", r.n ?? 0])),
+    composers: out.filter((r) => r.kind === "composer").map((r) => ({ id: r.key, name: r.name, count: r.n })),
+    lineups: (lineups?.results ?? []).map((r) => ({ key: r.key, description: r.description, players: r.players, count: r.n })),
+    core: totals.core ?? 0,
+    free: totals.free ?? 0,
+    lengths: { known: LENGTHS.map((_, i) => totals[`length_${i}`] ?? 0), unknown: totals.unknown_length ?? 0 },
+  };
+  return { total: totals.n ?? 0, offset, works, facets, ...(q.orchestra && { unscored: totals.unscored ?? 0 }) };
 }
 
 // ---- Single works and composers ----------------------------------------------

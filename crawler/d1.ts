@@ -1,5 +1,5 @@
 // A stand-in for a Cloudflare D1 binding over a local SQLite file, so the API's
-// queries run in tests exactly as written.
+// queries run in tests, and in the build (precomputed facets), exactly as written.
 
 import { DatabaseSync } from "node:sqlite";
 import type { Db, Stmt } from "../worker/queries.ts";
@@ -27,8 +27,8 @@ class SqliteStmt implements Stmt {
   }
 }
 
-export function sqliteDb(path: string): Db & { close(): void } {
-  const db = new DatabaseSync(path, { readOnly: true });
+export function sqliteDb(path: string | DatabaseSync): Db & { close(): void } {
+  const db = typeof path === "string" ? new DatabaseSync(path, { readOnly: true }) : path;
   return {
     prepare: (sql) => new SqliteStmt(db, sql),
     batch: async <T>(stmts: Stmt[]) => stmts.map((s) => ({ results: (s as SqliteStmt).run<T>() })),

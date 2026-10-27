@@ -109,7 +109,8 @@ export async function handleApi(request: Request, db: Db): Promise<Response> {
       if (composer && !ID.test(composer)) throw new HttpError(400, "Not a composer id");
       const subsets = p.get("subsets") === "1";
       return json(
-        await listWorks(db, subsets ? await lineups(db) : null, {
+        // The line-ups index (kept in memory) says which line-ups have their facets precomputed
+        await listWorks(db, await lineups(db), {
           lineup,
           subsets,
           minPlayers: int(p.get("min_players"), 1),
