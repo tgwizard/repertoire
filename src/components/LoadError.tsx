@@ -3,7 +3,7 @@ export function LoadError({ what, message, onRetry }: { what: string; message: s
   return (
     <div className="notice error load-error" role="alert">
       <span>
-        Couldn't load {what}. <span className="muted">The server said: {message}</span>
+        Couldn't load {what}. <span className="muted">{message}</span>
       </span>
       <button className="load-error-retry" onClick={onRetry}>
         Try again

@@ -48,7 +48,7 @@ export function App() {
 
       <ErrorBoundary resetKey={loc.n}>
         {error ? (
-          <div className="notice error">Couldn't load the repertoire: {error.message}.</div>
+          <div className="notice error">Couldn't load the repertoire. {error.message}</div>
         ) : !index ? (
           <div className="notice">
             <span className="spinner" /> Loading the repertoire…

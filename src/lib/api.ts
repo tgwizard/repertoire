@@ -14,16 +14,25 @@ declare const __BUILD_ID__: string;
  */
 const versioned = (path: string) => `${path}${path.includes("?") ? "&" : "?"}v=${__BUILD_ID__}`;
 
+/** How long to wait for an answer before saying so (and offering to try again) */
+const TIMEOUT_MS = 30_000;
+
+/** Fetches from the API. Errors carry a sentence to show: what went wrong, as far as we know. */
 export function api<T>(path: string): Promise<T> {
   let p = cache.get(path) as Promise<T> | undefined;
   if (!p) {
-    p = fetch(versioned(path)).then(async (res) => {
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        throw new ApiError(res.status, body?.error ?? `${res.status} ${res.statusText}`);
-      }
-      return res.json() as Promise<T>;
-    });
+    p = fetch(versioned(path), { signal: AbortSignal.timeout(TIMEOUT_MS) }).then(
+      async (res) => {
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as { error?: string } | null;
+          throw new ApiError(res.status, `The server said: ${body?.error ?? `${res.status} ${res.statusText}`}.`);
+        }
+        return res.json() as Promise<T>;
+      },
+      (e: Error) => {
+        throw new Error(e.name === "TimeoutError" ? `No answer after ${TIMEOUT_MS / 1000} seconds.` : "The server couldn't be reached. Check your connection.");
+      },
+    );
     p.catch(() => cache.delete(path));
     if (cache.size > 300) cache.delete(cache.keys().next().value!);
     cache.set(path, p);

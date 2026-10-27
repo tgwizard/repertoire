@@ -45,7 +45,7 @@ export function WorkPage({ id }: { id: string }) {
     if (w) document.title = `${w.title}${w.composer ? ` – ${w.composer.name}` : ""} · Repertoire Finder`;
   }, [w]);
 
-  if (error) return <div className="notice error">{"status" in error && error.status === 404 ? "No such work." : `Couldn't load this work: ${error.message}`}</div>;
+  if (error) return <div className="notice error">{"status" in error && error.status === 404 ? "No such work." : `Couldn't load this work. ${error.message}`}</div>;
   if (!w || (loading && w.id !== id)) {
     return (
       <div className="notice">

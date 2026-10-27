@@ -10,6 +10,7 @@ import { lineupSourceUrl, SOURCES, type SourceId } from "../shared/data";
 import { setSortParams, type Sorting } from "./SortSelect";
 import { InfoTip } from "./InfoTip";
 import { LoadError } from "./LoadError";
+import { LoadingStatus } from "./LoadingStatus";
 import { FilterControls } from "./FilterControls";
 import { WorkList } from "./WorkList";
 
@@ -26,6 +27,8 @@ interface Props {
   smallerGroups: number;
   /** Search text from the finder's search box */
   q: string;
+  /** A change about to load: the search being typed, the players settling */
+  pending: boolean;
   /** Where the filters go: the box with the finder's search in it */
   slot: HTMLElement | null;
   /** Filters and sort, kept in the URL */
@@ -84,7 +87,7 @@ function LineupSources({ lineup }: { lineup: string }) {
   );
 }
 
-export function Results({ lineup, total, includeArr, smaller, onSmallerChange, smallerGroups, q, slot, filters, onFiltersChange, orchestra, onOrchestraChange, exact, onExactChange, onSearchEverywhere }: Props) {
+export function Results({ lineup, total, includeArr, smaller, onSmallerChange, smallerGroups, q, pending, slot, filters, onFiltersChange, orchestra, onOrchestraChange, exact, onExactChange, onSearchEverywhere }: Props) {
   const players = playerCount(parseEnsembleKey(lineup));
   const { eras, composer, show, minPlayers, within, length } = filters;
   // Largest groups first reads best when listing smaller groups too; group sizes only
@@ -119,7 +122,9 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
     return p.toString().replaceAll("%2C", ",");
   }, [lineup, within, smaller, minPlayers, includeArr, filters, q, applied, exact, sorting.sort, sorting.order]);
 
-  const { works, total: matching, facets, unscored, loading, error, hasMore, loadMore, retry } = useWorks(params);
+  const { works, total: matching, facets, unscored, loading, more, error, hasMore, loadMore, retry } = useWorks(params);
+  // Updating the list: a request on its way, or one about to go (typing, players settling)
+  const busy = (loading && !more) || pending || orchestra.trim() !== typed;
   const filtering = q !== "" || eras.length > 0 || composer !== "" || show !== "all" || !!applied || length !== "";
   // Facets describe the unfiltered list; keep the last ones while a new query loads.
   const lastFacets = useRef(facets);
@@ -270,7 +275,7 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
           slot,
         )}
 
-      <div className="results-head">
+      <div className={busy ? "results-head stale" : "results-head"}>
         {/* One line however it's filtered, so filtering doesn't move the list */}
         <h2>
           {fmt.format(filtering ? matching : listTotal)}{" "}
@@ -289,21 +294,18 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
         )}
       </div>
 
-      <div className={loading && works.length ? "works-wrap stale" : "works-wrap"}>
+      <div className={busy && works.length ? "works-wrap stale" : "works-wrap"}>
+        {works.length > 0 && <LoadingStatus busy={busy} over />}
         <WorkList works={works} lineup={lineup} onComposer={(id) => set({ composer: id })} groupByPlayers={smaller && !within && sorting.sort === "players" ? players : undefined} />
       </div>
-      {loading && !works.length && (
-        <p className="muted">
-          <span className="spinner" /> Loading…
-        </p>
-      )}
+      {!works.length && <LoadingStatus busy={busy} over={false} label="Loading…" />}
       {hasMore && (
         <button className="more" onClick={loadMore} disabled={loading}>
           {loading ? "Loading…" : `Load more (${fmt.format(matching - works.length)} left)`}
         </button>
       )}
       {error && <LoadError what="the works" message={error} onRetry={retry} />}
-      {!loading && !error && works.length === 0 && <p className="muted">No works match these filters.</p>}
+      {!busy && !error && works.length === 0 && <p className="muted">No works match these filters.</p>}
     </section>
   );
 }

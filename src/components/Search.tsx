@@ -6,6 +6,7 @@ import { setFilterParams, type Filters } from "../lib/filters";
 import { useWorks } from "../lib/useWorks";
 import { FilterControls } from "./FilterControls";
 import { LoadError } from "./LoadError";
+import { LoadingStatus } from "./LoadingStatus";
 import { WorkList } from "./WorkList";
 
 const fmt = new Intl.NumberFormat("en");
@@ -38,6 +39,8 @@ export function SearchField({ value, onChange, narrowed, id }: FieldProps) {
 
 interface ResultsProps {
   q: string;
+  /** The search being typed, about to load */
+  pending: boolean;
   /** Where the filters go: the box with the finder's search in it */
   slot: HTMLElement | null;
   /** Filters and sort, kept in the URL */
@@ -49,7 +52,7 @@ interface ResultsProps {
 }
 
 /** Search across every line-up: matching composers, then works, best matches first. */
-export function SearchResults({ q, slot, filters, onFiltersChange, includeArr, onPickLineup }: ResultsProps) {
+export function SearchResults({ q, pending, slot, filters, onFiltersChange, includeArr, onPickLineup }: ResultsProps) {
   const set = (patch: Partial<Filters>) => onFiltersChange({ ...filters, ...patch });
   const sorting = { sort: filters.sort ?? ("relevance" as const), order: filters.order };
   const params = useMemo(() => {
@@ -60,7 +63,8 @@ export function SearchResults({ q, slot, filters, onFiltersChange, includeArr, o
     if (sorting.order) p.set("order", sorting.order);
     return p.toString();
   }, [q, includeArr, filters, sorting.sort, sorting.order]);
-  const { works, total, facets, loading, error, hasMore, loadMore, retry } = useWorks(params);
+  const { works, total, facets, loading, more, error, hasMore, loadMore, retry } = useWorks(params);
+  const busy = (loading && !more) || pending;
   // Facets describe the list as filtered; keep the last ones while a new query loads.
   const lastFacets = useRef(facets);
   if (facets) lastFacets.current = facets;
@@ -108,21 +112,18 @@ export function SearchResults({ q, slot, filters, onFiltersChange, includeArr, o
           ))}
         </ul>
       )}
-      <div className="results-head">
+      <div className={busy ? "results-head stale" : "results-head"}>
         <h2>
           {fmt.format(total)} <span className="muted">{total === 1 ? "work" : "works"} matching “{q}” in every line-up</span>
         </h2>
       </div>
-      <div className={loading && works.length ? "works-wrap stale" : "works-wrap"}>
+      <div className={busy && works.length ? "works-wrap stale" : "works-wrap"}>
+        {works.length > 0 && <LoadingStatus busy={busy} over label="Searching…" />}
         <WorkList works={works} showLineup />
       </div>
-      {loading && !works.length && (
-        <p className="muted">
-          <span className="spinner" /> Searching…
-        </p>
-      )}
+      {!works.length && <LoadingStatus busy={busy} over={false} label="Searching…" />}
       {error && <LoadError what="the search results" message={error} onRetry={retry} />}
-      {!loading && !error && total === 0 && <p className="muted">Nothing found. Try fewer words, other filters, or a composer's surname.</p>}
+      {!busy && !error && total === 0 && <p className="muted">Nothing found. Try fewer words, other filters, or a composer's surname.</p>}
       {hasMore && (
         <button className="more" onClick={loadMore} disabled={loading}>
           {loading ? "Loading…" : `Load more (${fmt.format(total - works.length)} left)`}

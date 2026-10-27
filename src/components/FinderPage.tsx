@@ -116,6 +116,7 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
       return (
         <SearchResults
           q={q}
+          pending={query.trim() !== q}
           slot={slot}
           filters={filters}
           onFiltersChange={setFilters}
@@ -152,6 +153,7 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
         onSmallerChange={changeSmaller}
         smallerGroups={smallerGroups}
         q={q}
+        pending={query.trim() !== q || ensembleKey(ensemble) !== settledKey}
         slot={slot}
         filters={filters}
         onFiltersChange={setFilters}

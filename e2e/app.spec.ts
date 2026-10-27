@@ -124,6 +124,42 @@ test("filters narrow the list, from facets with counts", async ({ page }) => {
   await expect(works(page)).toHaveCount(1);
 });
 
+test("a slow list says it's working and how it's going, without moving; a failed one offers to try again", async ({ page }) => {
+  await page.goto("/?i=violin:2,viola,cello");
+  await expect(works(page).first()).toBeVisible();
+  const pill = page.locator(".loading-pill");
+  const top = async () => (await works(page).first().boundingBox())!.y;
+  const before = await top();
+  // Hold the next lists back
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  await page.route(/\/api\/works\?/, async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.getByRole("button", { name: /^Romantic \d/ }).click();
+  await expect(pill).toContainText("Updating…");
+  await expect(page.locator(".works-wrap.stale")).toHaveCount(1);
+  await expect(pill).toContainText("Still working", { timeout: 6_000 });
+  expect(await top()).toBe(before);
+  // Typing shows it at once, before the search goes out
+  await page.getByRole("searchbox", { name: "Search works and composers" }).pressSequentially("x");
+  await expect(pill).toBeVisible();
+  await page.getByRole("searchbox", { name: "Search works and composers" }).fill("");
+  release();
+  await expect(pill).toHaveCount(0);
+  await page.unroute(/\/api\/works\?/);
+
+  // A list that fails says so, and trying again works
+  await page.route(/\/api\/works\?/, (route) => route.abort("connectionfailed"));
+  await page.getByRole("button", { name: /^Classical \d/ }).click();
+  await expect(page.getByRole("alert")).toContainText("couldn't be reached");
+  await page.unroute(/\/api\/works\?/);
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(works(page).first()).toBeVisible();
+});
+
 test("filters and sort live in the URL: a reload, a link or going back shows the same list", async ({ page }) => {
   await page.goto("/?i=violin:2,viola,cello");
   await page.getByRole("button", { name: /^Romantic \d/ }).click();

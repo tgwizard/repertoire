@@ -5,6 +5,7 @@ import { useWorks } from "../lib/useWorks";
 import { PROVIDERS } from "../shared/data";
 import { setSortParams, SortSelect, type Sorting } from "./SortSelect";
 import { LoadError } from "./LoadError";
+import { LoadingStatus } from "./LoadingStatus";
 import { WorkList } from "./WorkList";
 
 const fmt = new Intl.NumberFormat("en");
@@ -39,9 +40,10 @@ export function ComposerPage({ id }: { id: string }) {
     setSortParams(p, sorting);
     return p.toString().replaceAll("%2C", ",");
   }, [id, lineup, sorting]);
-  const { works, total, loading, error: worksError, hasMore, loadMore, retry } = useWorks(c ? query : null);
+  const { works, total, loading, more, error: worksError, hasMore, loadMore, retry } = useWorks(c ? query : null);
+  const busy = loading && !more;
 
-  if (error) return <div className="notice error">{"status" in error && error.status === 404 ? "No such composer." : `Couldn't load this composer: ${error.message}`}</div>;
+  if (error) return <div className="notice error">{"status" in error && error.status === 404 ? "No such composer." : `Couldn't load this composer. ${error.message}`}</div>;
   if (!c || c.id !== id) {
     return (
       <div className="notice">
@@ -96,13 +98,17 @@ export function ComposerPage({ id }: { id: string }) {
       </section>
 
       <section className="detail-section">
-        <div className="results-head row">
+        <div className={busy ? "results-head row stale" : "results-head row"}>
           <h2>
             {fmt.format(total)} <span className="muted">{total === 1 ? "work" : "works"}</span>
           </h2>
           <SortSelect sorting={sorting} onChange={setSorting} sorts={["rank", "chronological", "duration", "title"]} />
         </div>
-        <WorkList works={works} lineup={lineup || undefined} showLineup={!lineup} />
+        <div className={busy && works.length ? "works-wrap stale" : "works-wrap"}>
+          {works.length > 0 && <LoadingStatus busy={busy} over />}
+          <WorkList works={works} lineup={lineup || undefined} showLineup={!lineup} />
+        </div>
+        {!works.length && <LoadingStatus busy={busy} over={false} label="Loading…" />}
         {worksError && <LoadError what="the works" message={worksError} onRetry={retry} />}
         {hasMore && (
           <button className="more" onClick={loadMore} disabled={loading}>

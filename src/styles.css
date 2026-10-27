@@ -1144,9 +1144,52 @@ code {
   margin-right: 4px;
 }
 
-.works-wrap.stale {
-  opacity: 0.55;
+/* ---- Loading: the list and its count dim, and a pill floats over the list's top ---- */
+
+.works-wrap {
+  position: relative;
+}
+
+.works-wrap > .works,
+.results-head h2 {
   transition: opacity 0.2s;
+}
+
+.works-wrap.stale > .works,
+.results-head.stale h2 {
+  opacity: 0.45;
+}
+
+/* Takes no space (nothing moves), and stays in view while the list scrolls */
+.loading-anchor {
+  position: sticky;
+  top: 12px;
+  z-index: 5;
+  height: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.loading-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+  margin-top: 14px;
+  padding: 7px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 0.875rem;
+  color: var(--ink);
+}
+
+.loading-first {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* ---- Work and composer pages ---- */
