@@ -121,6 +121,7 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
           filters={filters}
           onFiltersChange={setFilters}
           includeArr={includeArr}
+          onIncludeArrChange={setIncludeArr}
           // Narrowing to a line-up keeps the search and filters; its list has its own sorts
           onPickLineup={(key) => {
             setEnsemble(parseEnsembleKey(key));
@@ -149,6 +150,7 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
         lineup={settledKey}
         total={count(settled)}
         includeArr={includeArr}
+        onIncludeArrChange={setIncludeArr}
         smaller={smaller}
         onSmallerChange={changeSmaller}
         smallerGroups={smallerGroups}
@@ -170,7 +172,7 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
   return (
     <div className={picked ? "layout picked" : "layout"} hidden={!active}>
       <aside className="sidebar">
-        <EnsembleBuilder count={count} ensemble={ensemble} onChange={changeEnsemble} includeArr={includeArr} onIncludeArrChange={setIncludeArr} />
+        <EnsembleBuilder count={count} ensemble={ensemble} onChange={changeEnsemble} />
       </aside>
       <div className="main-search">
         <div className="filter-box">

@@ -31,13 +31,13 @@ test("/api describes the endpoints; /api/meta the dataset", async () => {
   const meta = await get<Meta>("/api/meta");
   assert.equal(meta.version, "20261009T000000Z");
   assert.equal(meta.sources.imslp.items, 13);
-  assert.equal(meta.works, 16); // 13 on IMSLP, 2 from Open Opus, 1 from LIBRIS
+  assert.equal(meta.works, 17); // 13 on IMSLP, 2 from Open Opus, 2 from LIBRIS
 });
 
 test("/api/lineups counts originals and arrangements per line-up", async () => {
   const { lineups } = await get<LineupsIndex>("/api/lineups");
   assert.deepEqual(lineups[QUARTET], [5, 1]); // Debussy, Haydn, two from Open Opus, Hillborg from LIBRIS; Für Elise arranged
-  assert.deepEqual(lineups[WIND_QUINTET], [2, 0]);
+  assert.deepEqual(lineups[WIND_QUINTET], [3, 1]); // Nielsen, Barber, Sund; Tchaikovsky's waltz arranged
   const one = await get<{ description: string; sources: Record<string, string[]> }>(`/api/lineups/${QUARTET}`);
   assert.equal(one.description, "2 violins, viola, cello");
   assert.deepEqual(Object.keys(one.sources).sort(), ["imslp", "libris", "openopus"]);
@@ -96,6 +96,7 @@ test("smaller groups: every line-up drawn from the players, largest first", asyn
       [6, "Sextet, FP 100"],
       [5, "Summer Music, Op.31"], // a Wikipedia article and category outrank Nielsen's bare IMSLP page here
       [5, "Wind Quintet, Op.43"],
+      [5, "Per spelman, variationer för blåskvintett"],
       [3, "Trio for Flute, Oboe and Piano"],
       [2, "Sonata in E minor, HWV 359b"],
       [1, "Für Elise, WoO 59"],
@@ -105,14 +106,14 @@ test("smaller groups: every line-up drawn from the players, largest first", asyn
     page.facets!.lineups.map((l) => [l.key, l.count]),
     [
       ["bassoon,clarinet,flute,horn,oboe,piano", 1],
-      [WIND_QUINTET, 2],
+      [WIND_QUINTET, 3],
       ["flute,oboe,piano", 1],
       ["flute,piano", 1],
       ["piano", 1],
     ],
   );
   const twoPlus = await get<WorksPage>(`/api/works?lineup=flute,oboe,clarinet,bassoon,horn,piano&subsets=1&min_players=2`);
-  assert.equal(twoPlus.total, 5);
+  assert.equal(twoPlus.total, 6);
 });
 
 test("orchestral works an orchestra can play, or scored for exactly it; how many have no known scoring", async () => {
@@ -154,7 +155,8 @@ test("searching without a line-up: best matches first, with filters and the line
   assert.deepEqual(page.works.map((w) => w.id), search.works.map((w) => w.id)); // the search's own order
   assert.equal(page.total, search.total);
   assert.ok(page.facets!.lineups.some((l) => l.key === "orchestra" && l.count === 2), JSON.stringify(page.facets!.lineups));
-  assert.deepEqual(page.facets!.composers.map((c) => c.name), ["Johannes Brahms"]);
+  assert.deepEqual(page.facets!.composers.map((c) => c.name), ["Johannes Brahms", "Pyotr Tchaikovsky"]); // a work Brahms arranged
+  assert.equal(page.works.at(-1)!.title, "Serenade for Strings, Op.48"); // after his own
   const romantic = await get<WorksPage>("/api/works?q=brahms&sort=relevance&facets=1&arrangements=1&lineup=&era=Romantic");
   assert.ok(romantic.total > 0 && romantic.works.every((w) => w.era === "Romantic"));
   // Without a search, best match means nothing: established first
@@ -195,6 +197,50 @@ test("duration: filters and sort", async () => {
   assert.deepEqual(all.facets!.lengths, { known: [0, 0, 1, 0], unknown: all.total - 1 });
   assert.equal((await get<WorksPage>(`/api/works?lineup=${QUARTET}&min_duration=10&max_duration=20`)).total, 0); // 20 minutes is in 20–40
   assert.equal((await get<WorksPage>(`/api/works?lineup=${QUARTET}&duration=unknown`)).total, all.total - 1);
+});
+
+test("arrangements say who arranged them; searching finds them by arranger", async () => {
+  // On the line-up's list, an arrangement row says whose it is, and of what
+  const arranged = await get<WorksPage>(`/api/works?lineup=${WIND_QUINTET}&arrangements=1`);
+  const serenade = arranged.works.find((w) => w.title === "Serenade for Strings, Op.48")!;
+  assert.deepEqual(serenade.arrangedBy, [{ arranger: "Jesper Jerkert", excerpt: "Waltz (No.2)" }]);
+  assert.ok(arranged.works.filter((w) => !w.arrangement).every((w) => !w.arrangedBy)); // originals don't
+  // Searching for the arranger: the work, and which arrangement it's found by
+  // A work found by its arranger is an arrangement: listed with them, counted without
+  const originals = await get<WorksPage>("/api/works?q=jerkert&sort=relevance&facets=1");
+  assert.equal(originals.total, 0);
+  assert.equal(originals.facets!.arrangements, 1);
+  const found = await get<WorksPage>("/api/works?q=jerkert&sort=relevance&facets=1&arrangements=1");
+  assert.equal(found.facets!.arrangements, 1);
+  assert.deepEqual(
+    found.works.map((w) => [w.title, w.arrangedBy]),
+    [["Serenade for Strings, Op.48", [{ arranger: "Jesper Jerkert", excerpt: "Waltz (No.2)", lineup: "flute, oboe, clarinet, bassoon, horn" }]]],
+  );
+  // The work page lists them all, in IMSLP's order
+  const w = await get<WorkDetail>(`/api/works/${serenade.id}`);
+  assert.deepEqual(w.arrangements.map((a) => [a.lineup, a.arranger, a.excerpt]), [
+    ["piano 4 hands", "Johannes Brahms", null],
+    [WIND_QUINTET, "Jesper Jerkert", "Waltz (No.2)"],
+    [null, null, null],
+  ]);
+  // Within the line-up: the arranger's name finds the arrangement rows, not originals
+  assert.deepEqual((await get<WorksPage>(`/api/works?lineup=${WIND_QUINTET}&arrangements=1&q=jerkert`)).works.map((w) => w.title), ["Serenade for Strings, Op.48"]);
+  assert.equal((await get<WorksPage>(`/api/works?lineup=${WIND_QUINTET}&q=jerkert&facets=1`)).facets!.arrangements, 1);
+  // Facets count the works only arranged for the line-up, listed or not
+  for (const arr of ["0", "1"]) {
+    const page = await get<WorksPage>(`/api/works?lineup=${WIND_QUINTET}&arrangements=${arr}&facets=1&era=Romantic`);
+    assert.equal(page.facets!.arrangements, 1, `arrangements=${arr}`); // Tchaikovsky's waltz
+    assert.equal(page.total, arr === "1" ? 2 : 1); // and Nielsen
+  }
+  // A composer's page: the works they arranged, if asked
+  const brahms = (await get<SearchResults>("/api/search?q=brahms")).composers[0]!;
+  assert.equal((await get<ComposerDetail>(`/api/composers/${brahms.id}`)).arranged, 1);
+  const own = await get<WorksPage>(`/api/works?composer=${brahms.id}&arrangements=1`);
+  const withArranged = await get<WorksPage>(`/api/works?composer=${brahms.id}&arrangements=1&arranged_by=1`);
+  assert.equal(withArranged.total, own.total + 1);
+  const theirs = withArranged.works.find((w) => w.composer?.name !== "Johannes Brahms")!;
+  assert.equal(theirs.title, "Serenade for Strings, Op.48");
+  assert.deepEqual(theirs.arrangedBy, [{ arranger: "Johannes Brahms", excerpt: null, lineup: "piano four hands" }]);
 });
 
 test("a work: its line-ups, links, aliases and ranking", async () => {

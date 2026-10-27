@@ -17,14 +17,34 @@ const PAGE = `{{#fte:imslppage
 |Copyright=Public Domain
 }}
 ===Arrangements and Transcriptions===
+====Complete====
 =====For Piano (Sarić)=====
 {{#fte:imslpfile
 |File Description 1=Complete Score
+|Arranger={{LinkArr|Sanja|Sarić||}}
+|Copyright=Public Domain
 }}
 =====Parts=====
 {{#fte:imslpfile
 |File Description 1=Flute
 }}
+====Overture====
+=====*For Flute, Oboe, Clarinet, Bassoon and Horn (Jerkert)=====
+{{#fte:imslpfile
+|File Tags=fl ob cl bn hn (arr)
+|File Description 1=Complete Score
+|Arranger={{LinkArr|Jesper|Jerkert||}}
+|Editor=
+|Copyright=Creative Commons Attribution-NonCommercial 4.0
+}}
+{{#fte:imslpfile
+|File Tags=fl ob cl bn hn (arr)
+|File Description 1=Flute
+|Arranger={{LinkArr|Jesper|Jerkert||}}
+|Editor=
+|Copyright=Creative Commons Attribution-NonCommercial 4.0
+}}
+===General Information===
 |Instrumentation=2 oboes, 2 horns, strings
 |Number of Movements/Sections=3 movements:
 #Allegro
@@ -34,14 +54,26 @@ const PAGE = `{{#fte:imslppage
 |Key=D major
 }}`;
 
-test("a page: its fields, and the original edition's parts (not an arrangement's)", () => {
+test("a page: its fields, the original edition's parts (not an arrangement's), its arrangements", () => {
   assert.deepEqual(extractPage(PAGE, 7, 1), {
     at: 1,
     rev: 7,
+    v: 2,
     instrumentation: "2 oboes, 2 horns, strings",
     movements: "3 movements:\n#Allegro\n#Andante\n#Presto",
     duration: "12 minutes",
     parts: [["Oboe 1/2", "Horn 1/2 (D)", "Violins I"]],
+    arrangements: [
+      { headings: ["Complete", "For Piano (Sarić)"], arranger: "{{LinkArr|Sanja|Sarić||}}", copyright: "Public Domain" },
+      { headings: ["Complete", "Parts"] },
+      // Its two files, once
+      {
+        headings: ["Overture", "*For Flute, Oboe, Clarinet, Bassoon and Horn (Jerkert)"],
+        arranger: "{{LinkArr|Jesper|Jerkert||}}",
+        tags: "fl ob cl bn hn (arr)",
+        copyright: "Creative Commons Attribution-NonCommercial 4.0",
+      },
+    ],
   });
 });
 

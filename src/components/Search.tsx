@@ -47,12 +47,13 @@ interface ResultsProps {
   filters: Filters;
   onFiltersChange: (f: Filters) => void;
   includeArr: boolean;
+  onIncludeArrChange: (v: boolean) => void;
   /** Narrow the search to one line-up */
   onPickLineup: (key: string) => void;
 }
 
 /** Search across every line-up: matching composers, then works, best matches first. */
-export function SearchResults({ q, pending, slot, filters, onFiltersChange, includeArr, onPickLineup }: ResultsProps) {
+export function SearchResults({ q, pending, slot, filters, onFiltersChange, includeArr, onIncludeArrChange, onPickLineup }: ResultsProps) {
   const set = (patch: Partial<Filters>) => onFiltersChange({ ...filters, ...patch });
   const sorting = { sort: filters.sort ?? ("relevance" as const), order: filters.order };
   const params = useMemo(() => {
@@ -81,6 +82,7 @@ export function SearchResults({ q, pending, slot, filters, onFiltersChange, incl
             set={set}
             facets={f}
             sorts={["relevance", "rank", "chronological", "duration", "composer", "title"]}
+            arrangements={{ included: includeArr, onChange: onIncludeArrChange }}
             before={
               <div className="filter-group">
                 <label className="filter-label" htmlFor="filter-lineup">
@@ -106,7 +108,7 @@ export function SearchResults({ q, pending, slot, filters, onFiltersChange, incl
               <Link href={composerPath(c)}>{c.name}</Link>
               <span className="muted small">
                 {" "}
-                {lifespan(c)} · {fmt.format(c.works)} works
+                {lifespan(c)} · {fmt.format(c.works)} {c.works === 1 ? "work" : "works"}
               </span>
             </li>
           ))}

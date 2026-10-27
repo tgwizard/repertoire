@@ -288,6 +288,36 @@ test("a work page, and back to the list where you left it", async ({ page }) => 
   noErrors();
 });
 
+test("arrangements say whose they are: found by the arranger's name, and listed on the work", async ({ page }) => {
+  const noErrors = watchErrors(page);
+  await page.goto("/?q=jerkert");
+  // Found by their arranger, they're arrangements: counted, and listed on request
+  await expect(works(page)).toHaveCount(1);
+  await page.locator(".filter-box").getByRole("button", { name: /^Arrangements/ }).click();
+  const cosi = works(page).filter({ hasText: "Così fan tutte" }).first();
+  await expect(cosi.locator(".arranged-tag")).toHaveText("arr. Jesper Jerkert for flute, oboe, clarinet, bassoon, horn · Overture");
+  await cosi.getByRole("link", { name: /Così fan tutte/ }).click();
+  await expect(page.locator(".scorings li").filter({ hasText: "flute, oboe, clarinet, bassoon, horn" })).toContainText("arr. Jesper Jerkert · Overture");
+  // On the line-up's list his own work; arrangements, with their count, are a filter
+  await page.goto("/?i=flute,oboe,clarinet,bassoon,horn&q=jerkert");
+  await expect(works(page)).toHaveCount(1);
+  const chip = page.locator(".filter-box").getByRole("button", { name: /^Arrangements/ });
+  await expect(chip).toContainText("10");
+  await chip.click();
+  await expect(page).toHaveURL(/arr=1/);
+  await expect(works(page).filter({ hasText: "Così fan tutte" }).locator(".arranged-tag")).toHaveText("arr. Jesper Jerkert · Overture");
+  await expect(chip).toHaveAttribute("aria-pressed", "true");
+  // His composer page: his own work, and on request the works he arranged
+  await page.goto("/?q=jerkert");
+  await page.locator(".composer-matches").getByRole("link", { name: "Jesper Jerkert" }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Jesper Jerkert");
+  await expect(works(page)).toHaveCount(1);
+  await page.getByRole("button", { name: /Their arrangements/ }).click();
+  await expect(works(page)).toHaveCount(11);
+  await expect(works(page).filter({ hasText: "Così fan tutte" }).locator(".arranged-tag")).toHaveText("arr. Jesper Jerkert for flute, oboe, clarinet, bassoon, horn · Overture");
+  noErrors();
+});
+
 test("a work's line-up links to the finder for that line-up", async ({ page }) => {
   await page.goto("/?q=brahms%20clarinet%20quintet");
   await works(page).first().getByRole("link", { name: "Clarinet Quintet, Op.115" }).click();

@@ -1,6 +1,6 @@
 // IMSLP work pages: the fields the categories don't carry (instrumentation as written,
-// movements, duration) and the names of the original edition's parts, which spell out
-// an orchestra's scoring. Raw text only: parsing happens in the build, so a better
+// movements, duration), the names of the original edition's parts, which spell out
+// an orchestra's scoring, and who arranged what for whom. Raw text only: parsing happens in the build, so a better
 // parser doesn't need a recrawl.
 
 import { fetchJson, jitteredMaxAge, progress, readStage, writeStage } from "../http.ts";
@@ -8,6 +8,8 @@ import type { ImslpStage } from "./imslp.ts";
 
 const API = "https://imslp.org/api.php";
 const BATCH = 50; // the most pages MediaWiki returns content for, for clients without bot rights
+/** Bumped when pages hold more than before; older pages are fetched again (see `stale`) */
+const VERSION = 2;
 
 export interface ImslpPage {
   /** When fetched */
@@ -18,6 +20,20 @@ export interface ImslpPage {
   duration?: string;
   /** Part descriptions ("Flute 1, 2", "Horn 3 (F)") of each original edition that has parts */
   parts?: string[][];
+  /** The file blocks under "Arrangements and Transcriptions" */
+  arrangements?: ImslpArrangementBlock[];
+  /** What the page holds (VERSION); 2 added arrangements */
+  v?: number;
+}
+
+export interface ImslpArrangementBlock {
+  /** Headings above it within the section: ["Overture", "*For Flute, Oboe, … and Horn (Jerkert)"] */
+  headings: string[];
+  /** As written: "{{LinkArr|Jesper|Jerkert||}}", "Charles Di Caro", "Unknown" */
+  arranger?: string;
+  /** "fl ob cl bn hn (arr)" */
+  tags?: string;
+  copyright?: string;
 }
 
 export interface ImslpPagesStage {
@@ -62,26 +78,74 @@ export function originalParts(text: string): string[][] {
   return out.filter((p) => p.length);
 }
 
+/** Arrangement file blocks, each with the headings above it below the section's own. */
+export function arrangementBlocks(text: string): ImslpArrangementBlock[] {
+  const out: ImslpArrangementBlock[] = [];
+  const headings: string[] = [];
+  let section = 0; // the arrangements heading's level, while inside it
+  let block: string[] | null = null;
+  const seen = new Set<string>();
+  for (const line of text.split("\n")) {
+    if (block) {
+      if (line.startsWith("}}")) {
+        const fields = block.join("\n");
+        const get = (name: string) => field(fields, name)?.slice(0, 300);
+        // Some pages name the arranger as the editor ({{LinkArr}} says which it is)
+        const editor = get("Editor");
+        const b: ImslpArrangementBlock = { headings: headings.slice(section).filter(Boolean) };
+        const arranger = get("Arranger") ?? (editor && /LinkArr/.test(editor) ? editor : undefined);
+        if (arranger) b.arranger = arranger;
+        const tags = get("File Tags");
+        if (tags) b.tags = tags;
+        const copyright = get("Copyright");
+        if (copyright) b.copyright = copyright;
+        const key = JSON.stringify(b);
+        if (!seen.has(key)) seen.add(key), out.push(b);
+        block = null;
+      } else block.push(line);
+      continue;
+    }
+    const h = /^(={2,6})\s*(.*?)\s*\1\s*$/.exec(line);
+    if (h) {
+      const level = h[1]!.length;
+      if (section && level <= section) section = 0;
+      headings.length = level;
+      headings[level - 1] = h[2]!;
+      if (/^Arrangements|^Transcriptions/i.test(h[2]!)) section = level;
+      continue;
+    }
+    if (section && line.startsWith("{{#fte:imslpfile")) block = [];
+  }
+  return out;
+}
+
 export function extractPage(text: string, rev: number, at: number): ImslpPage {
-  const page: ImslpPage = { at, rev };
+  const page: ImslpPage = { at, rev, v: VERSION };
   for (const [key, name] of Object.entries(FIELDS)) {
     const v = field(text, name);
     if (v) page[key as keyof typeof FIELDS] = v;
   }
   const parts = originalParts(text);
   if (parts.length) page.parts = parts;
+  const arrangements = arrangementBlocks(text);
+  if (arrangements.length) page.arrangements = arrangements;
   return page;
 }
 
-/** Pages are re-read after 60–120 days (staggered per page). */
+/**
+ * Pages are re-read after 60–120 days (staggered per page), and sooner when they were
+ * read before the stage kept something they have (arrangements: pages in an "(arr)" category).
+ */
 export async function crawlImslpPages(): Promise<void> {
   const imslp = await readStage<ImslpStage>("imslp");
   if (!imslp) throw new Error("run the imslp stage first");
   const stage = (await readStage<ImslpPagesStage>("imslp-pages")) ?? { pages: {} };
   const ids = Object.keys(imslp.works).map(Number);
+  const arranged = new Set(Object.entries(imslp.members).flatMap(([c, ids]) => (c.endsWith(" (arr)") ? ids : [])));
+  const stale = (id: number, p: ImslpPage) => (p.v ?? 1) < 2 && arranged.has(id);
   const todo = ids.filter((id) => {
     const p = stage.pages[id];
-    return !p || Date.now() - p.at > jitteredMaxAge(String(id), 60, 120);
+    return !p || stale(id, p) || Date.now() - p.at > jitteredMaxAge(String(id), 60, 120);
   });
   // Pages no longer in any instrumentation category
   const live = new Set(ids);
@@ -113,7 +177,8 @@ export async function crawlImslpPages(): Promise<void> {
   await writeStage("imslp-pages", stage);
   const n = Object.values(stage.pages);
   console.log(
-    `  ${n.length} pages: ${n.filter((p) => p.parts).length} with parts, ${n.filter((p) => p.duration).length} with a duration, ${n.filter((p) => p.movements).length} with movements`,
+    `  ${n.length} pages: ${n.filter((p) => p.parts).length} with parts, ${n.filter((p) => p.duration).length} with a duration, ` +
+      `${n.filter((p) => p.movements).length} with movements, ${n.filter((p) => p.arrangements).length} with arrangements`,
   );
 }
 

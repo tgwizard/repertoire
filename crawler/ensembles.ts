@@ -101,20 +101,34 @@ export function wikidataInstrumentsFit(instruments: string[], parts: Ensemble): 
   return instruments.every((q) => WIKIDATA_ENSEMBLES[q] || (WIKIDATA_INSTRUMENTS[q] && parts[WIKIDATA_INSTRUMENTS[q]!]));
 }
 
-const PLAYERS: Record<string, number> = { duo: 2, trio: 3, quartet: 4, quintet: 5, sextet: 6, septet: 7, octet: 8, nonet: 9 };
+// In English, Swedish, German, French and Italian (endings for plurals are added below)
+const PLAYERS: Record<string, number> = {
+  duo: 2, duet: 2, duett: 2, duetto: 2, trio: 3, quartet: 4, kvartett: 4, quartett: 4, quatuor: 4, quartetto: 4,
+  quintet: 5, kvintett: 5, quintett: 5, quintette: 5, quintetto: 5, sextet: 6, sextett: 6, sextuor: 6, sestetto: 6,
+  septet: 7, septett: 7, septuor: 7, settimino: 7, octet: 8, oktett: 8, octuor: 8, ottetto: 8, nonet: 9, nonett: 9, nonetto: 9,
+};
+
+const ACCOMPANYING = ["piano", "organ", "harpsichord", "continuo", "guitar", "harp"];
+
+const GROUP = new RegExp(`\\b(${Object.keys(PLAYERS).join("|")})(?:s|e|er|en|i)?\\b`);
+const KEYBOARD = new Set(["piano", "organ", "harpsichord"]);
 
 /**
  * Sanity check for line-ups from non-IMSLP sources: a title naming a group size
- * ("Sextet") must agree with the line-up's number of players.
+ * ("Sextet") must agree with the line-up's number of players, or of players besides
+ * their accompaniment (vocal "Duette" are for two voices and piano). Only the first
+ * group word counts: "Quintet for clarinet and string quartet". Not checked: one
+ * keyboard (an organ's trio sonatas), percussion (how many players is it?).
  */
 export function titleFitsPlayers(title: string, parts: Ensemble): boolean {
   if (parts.orchestra || parts["chamber orchestra"] || parts.strings || parts["wind band"] || parts["brass band"]) return true;
+  const ids = Object.keys(parts);
+  if (parts.percussion || (ids.length === 1 && KEYBOARD.has(ids[0]!) && parts[ids[0]!] === 1)) return true;
+  const word = GROUP.exec(title.toLowerCase())?.[1];
+  if (!word) return true;
   const players = Object.values(parts).reduce((s, n) => s + n, 0);
-  const t = title.toLowerCase();
-  for (const [word, n] of Object.entries(PLAYERS)) {
-    if (new RegExp(`\\b${word}s?\\b`).test(t) && n !== players) return false;
-  }
-  return true;
+  const accompaniment = ACCOMPANYING.reduce((s, id) => s + (parts[id] ?? 0), 0);
+  return PLAYERS[word] === players || PLAYERS[word] === players - accompaniment;
 }
 
 const SOLOISTS = "violin|viola|cello|piano|flute|clarinet|oboe|horn|trumpet|bassoon|harp|guitar";

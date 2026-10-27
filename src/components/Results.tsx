@@ -40,6 +40,7 @@ interface Props {
   exact: boolean;
   onExactChange: (v: boolean) => void;
   onSearchEverywhere: () => void;
+  onIncludeArrChange: (v: boolean) => void;
 }
 
 
@@ -87,7 +88,7 @@ function LineupSources({ lineup }: { lineup: string }) {
   );
 }
 
-export function Results({ lineup, total, includeArr, smaller, onSmallerChange, smallerGroups, q, pending, slot, filters, onFiltersChange, orchestra, onOrchestraChange, exact, onExactChange, onSearchEverywhere }: Props) {
+export function Results({ lineup, total, includeArr, smaller, onSmallerChange, smallerGroups, q, pending, slot, filters, onFiltersChange, orchestra, onOrchestraChange, exact, onExactChange, onSearchEverywhere, onIncludeArrChange }: Props) {
   const players = playerCount(parseEnsembleKey(lineup));
   const { eras, composer, show, minPlayers, within, length } = filters;
   // Largest groups first reads best when listing smaller groups too; group sizes only
@@ -270,6 +271,7 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
               set={set}
               facets={f}
               sorts={smaller && !within ? ["players", "rank", "chronological", "duration", "composer", "title"] : ["rank", "chronological", "duration", "composer", "title"]}
+              arrangements={{ included: includeArr, onChange: onIncludeArrChange }}
             />
           </>,
           slot,
@@ -305,7 +307,19 @@ export function Results({ lineup, total, includeArr, smaller, onSmallerChange, s
         </button>
       )}
       {error && <LoadError what="the works" message={error} onRetry={retry} />}
-      {!busy && !error && works.length === 0 && <p className="muted">No works match these filters.</p>}
+      {!busy && !error && works.length === 0 && (
+        <p className="muted">
+          No works match these filters.
+          {q && !includeArr && (
+            <>
+              {" "}
+              <button className="link-button" onClick={() => onIncludeArrChange(true)}>
+                Include arrangements
+              </button>
+            </>
+          )}
+        </p>
+      )}
     </section>
   );
 }

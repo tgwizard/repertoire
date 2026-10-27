@@ -4,7 +4,7 @@ import { Link } from "../lib/router";
 import { describeOrchestration } from "../lib/orchestration";
 import { formatDuration } from "../shared/paths";
 import { CORE_SCORE, lineupSourceUrl, PROVIDERS, SOURCES, type Link as WorkLink } from "../shared/data";
-import { WorkList } from "./WorkList";
+import { arrangedText, WorkList } from "./WorkList";
 
 const fmt = new Intl.NumberFormat("en");
 
@@ -58,6 +58,14 @@ export function WorkPage({ id }: { id: string }) {
   const libraries = w.links.filter((l) => l.kind === "library");
   const elsewhere = w.links.filter((l) => l.kind === "reference" || l.kind === "data");
   const others = (more.data?.works ?? []).filter((o) => o.id !== w.id).slice(0, 5);
+  // IMSLP's arrangements: under the line-up they're for, the rest (a "theatre orchestra")
+  // as IMSLP heads them
+  const arrangedFor = (lineup: string) =>
+    w.arrangements
+      .filter((a) => a.lineup === lineup)
+      .map((a) => arrangedText({ arranger: a.arranger, excerpt: a.excerpt }))
+      .filter((t): t is string => !!t);
+  const unplaced = w.arrangements.filter((a) => !a.lineup);
   const rismPerson = composer.data?.links.find((l) => l.provider === "rism")?.url;
 
   return (
@@ -146,9 +154,20 @@ export function WorkPage({ id }: { id: string }) {
                   );
                 })}
               </span>
+              {arrangedFor(s.lineup).length > 0 && <span className="arranged-tag">{arrangedFor(s.lineup).join("; ")}</span>}
             </li>
           ))}
         </ul>
+        {unplaced.length > 0 && (
+          <p className="muted small">
+            Also arranged on IMSLP:{" "}
+            {unplaced
+              .slice(0, 8)
+              .map((a) => [a.heading, a.excerpt && `(${a.excerpt})`].filter(Boolean).join(" "))
+              .join("; ")}
+            {unplaced.length > 8 && `; and ${unplaced.length - 8} more`}
+          </p>
+        )}
         {w.orchestration && (
           <div className="orchestration">
             <p>

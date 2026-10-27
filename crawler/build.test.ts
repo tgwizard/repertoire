@@ -70,7 +70,26 @@ test("LIBRIS: borrow links for works we have, and works we didn't have from the 
   assert.deepEqual(all("SELECT ref FROM links WHERE entity_id = ? AND provider = 'libris' ORDER BY ref", hillborg.id), [{ ref: "lbkv1" }, { ref: "lbkv2" }]);
   assert.deepEqual(all("SELECT name, born, died FROM composers WHERE id = ?", hillborg.composer_id), [{ name: "Anders Hillborg", born: 1954, died: null }]);
   assert.equal(all("SELECT * FROM works WHERE title LIKE '%arr. for brass%'").length, 0);
-  assert.deepEqual(all("SELECT items, matched, added FROM sources WHERE id = 'libris'")[0], { items: 4, matched: 2, added: 1 });
+  // A line-up only the title spells out; a title and instrumentation that disagree
+  assert.deepEqual(lineups(work("Per spelman, variationer för blåskvintett").id), [{ lineup: "bassoon,clarinet,flute,horn,oboe", arrangement: 0 }]);
+  assert.equal(all("SELECT * FROM works WHERE title LIKE 'Partita%'").length, 0);
+  assert.deepEqual(all("SELECT items, matched, added FROM sources WHERE id = 'libris'")[0], { items: 6, matched: 2, added: 2 });
+});
+
+test("IMSLP arrangements: who arranged what for which of the work's line-ups; arrangers are searchable", () => {
+  const serenade = work("Serenade for Strings, Op.48");
+  assert.deepEqual(all("SELECT lineup, arranger, excerpt, heading, license FROM arrangements WHERE work_id = ? ORDER BY position", serenade.id), [
+    { lineup: "piano 4 hands", arranger: "Johannes Brahms", excerpt: null, heading: "For Piano 4 hands (Brahms)", license: "Public Domain" },
+    {
+      lineup: "bassoon,clarinet,flute,horn,oboe",
+      arranger: "Jesper Jerkert",
+      excerpt: "Waltz (No.2)",
+      heading: "For Flute, Oboe, Clarinet, Bassoon and Horn (Jerkert)",
+      license: "Creative Commons Attribution-NonCommercial 4.0",
+    },
+    { lineup: null, arranger: null, excerpt: null, heading: "For Theatre Orchestra", license: "Public Domain" }, // the work isn't listed for orchestra
+  ]);
+  assert.deepEqual(all("SELECT w.title FROM works_fts f JOIN works w ON w.n = f.rowid WHERE works_fts MATCH 'jerkert'"), [{ title: "Serenade for Strings, Op.48" }]);
 });
 
 test("a wrong IMSLP link on Wikidata doesn't split a composer: names decide", () => {
@@ -135,9 +154,13 @@ test("line-up claims that contradict the title are refused", () => {
 
 test("line-ups count their works and say where they come from", () => {
   const quintet = all("SELECT * FROM lineups WHERE key = 'bassoon,clarinet,flute,horn,oboe'")[0]!;
-  assert.equal(quintet.original, 3); // Nielsen, Barber (IMSLP page and Wikipedia item, separate in this crawl)
+  assert.equal(quintet.original, 4); // Nielsen, Barber (IMSLP page and Wikipedia item, separate in this crawl), Sund from LIBRIS
   assert.equal(quintet.players, 5);
-  assert.deepEqual(JSON.parse(quintet.sources), { imslp: ["For flute, oboe, clarinet, bassoon, horn"], wikipedia: ["Compositions for wind quintet"] });
+  assert.deepEqual(JSON.parse(quintet.sources), {
+    imslp: ["For flute, oboe, clarinet, bassoon, horn", "For flute, oboe, clarinet, bassoon, horn (arr)"],
+    libris: ["Per spelman, variationer för blåskvintett"],
+    wikipedia: ["Compositions for wind quintet"],
+  });
   for (const l of all("SELECT * FROM lineups")) {
     const counted = all("SELECT SUM(arrangement = 0) AS o, SUM(arrangement = 1) AS a FROM scorings WHERE lineup = ?", l.key)[0]!;
     assert.deepEqual([l.original, l.arrangements], [counted.o, counted.a], l.key);

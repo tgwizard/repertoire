@@ -14,6 +14,7 @@ import { formatOrchestration, LABELS, orchestraColumns } from "../../src/lib/orc
 import { sqliteDb } from "../../crawler/d1.ts";
 import { listWorks, PRECOMPUTED_FACETS_MIN } from "../../worker/queries.ts";
 import { ERAS, PROVIDERS, score, SIGNALS, type ProviderId, type Signal } from "../../src/shared/data.ts";
+import { normalize } from "../../src/shared/text.ts";
 
 if (!existsSync(DATASET_PATH)) throw new Error(`No dataset at ${DATASET_PATH}: run npm run index or npm run data:pull`);
 const db = new DatabaseSync(DATASET_PATH, { readOnly: true });
@@ -147,6 +148,29 @@ test("durations and movements are plausible", () => {
   none("SELECT id, movements FROM works WHERE movements < 1 OR movements > 200", "implausible movement counts");
   const n = one("SELECT COUNT(duration) AS d, COUNT(movements) AS m FROM works");
   assert.ok(n.d > 30_000 && n.m > 50_000, `durations ${n.d}, movements ${n.m}`);
+});
+
+test("arrangements: for line-ups their works are listed for, arrangers named, searchable", () => {
+  none(
+    "SELECT a.work_id, a.lineup FROM arrangements a WHERE a.lineup IS NOT NULL AND NOT EXISTS (SELECT 1 FROM scorings s WHERE s.work_id = a.work_id AND s.lineup = a.lineup)",
+    "arrangements for a line-up the work isn't listed for",
+  );
+  none("SELECT work_id, arranger FROM arrangements WHERE arranger = '' OR arranger GLOB '*[{}?]*' OR arranger LIKE '%[[%' OR lower(arranger) IN ('unknown', 'anonymous')", "arrangers that aren't names");
+  none("SELECT work_id, excerpt FROM arrangements WHERE excerpt = '' OR excerpt GLOB '*[{}]*'", "excerpts with wiki markup");
+  none("SELECT work_id FROM arrangements GROUP BY work_id HAVING MAX(position) != COUNT(*) - 1", "gaps in arrangement order");
+  // Every named arranger is in the work's search row, folded as queries are
+  const unsearchable = all(
+    `SELECT a.work_id, a.arranger, f.arrangers FROM arrangements a JOIN works w ON w.id = a.work_id JOIN works_fts f ON f.rowid = w.n
+     WHERE a.arranger IS NOT NULL AND a.arranger != 'the composer'`,
+  ).filter((r) => !normalize(r.arranger).split(" ").every((word: string) => ` ${r.arrangers} `.includes(` ${word} `) || ` ${r.arrangers} `.includes(word)));
+  assert.deepEqual(unsearchable.slice(0, 5), [], "arrangers missing from search");
+  const n = one("SELECT COUNT(*) AS n, COUNT(arranger) AS named, COUNT(lineup) AS placed FROM arrangements");
+  assert.ok(n.n > 50_000 && n.named / n.n > 0.85 && n.placed / n.n > 0.9, JSON.stringify(n));
+  // Most line-ups IMSLP lists a work as arranged for say whose arrangement it is
+  const covered = one(
+    "SELECT AVG(EXISTS (SELECT 1 FROM arrangements a WHERE a.work_id = s.work_id AND a.lineup = s.lineup)) AS p FROM scorings s WHERE s.arrangement = 1 AND s.sources LIKE '%\"imslp\"%'",
+  ).p;
+  assert.ok(covered > 0.7, `only ${covered} of IMSLP's arrangement listings have their arrangement`);
 });
 
 test("composers: every one has works, and counts match", () => {

@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { DATA_TABLES, INDEXES, TABLES } from "./db.ts";
 
 const MAX_STATEMENT = 90_000; // bytes; D1 allows 100 KB
-const FTS_TABLES = { works_fts: ["title", "composer", "aliases", "keys"], composers_fts: ["name"] } as const;
+const FTS_TABLES = { works_fts: ["title", "composer", "aliases", "keys", "arrangers"], composers_fts: ["name"] } as const;
 
 function literal(v: unknown): string {
   if (v === null || v === undefined) return "NULL";

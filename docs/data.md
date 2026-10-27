@@ -6,13 +6,13 @@ What the dataset is meant to be: every work for classical instruments, listed fo
 
 | Source | Why | License |
 |---|---|---|
-| [IMSLP](https://imslp.org) | The backbone: its `For …` categories give each work's exact instrumentation, separately for arrangements, and it has the free sheet music. Also eras, whether a work has recordings, and from its work pages durations, movements and an orchestra's scoring (the names of its parts). | CC BY-SA 4.0 |
+| [IMSLP](https://imslp.org) | The backbone: its `For …` categories give each work's exact instrumentation, separately for arrangements, and it has the free sheet music. Also eras, whether a work has recordings, and from its work pages durations, movements, an orchestra's scoring (the names of its parts) and who arranged what. | CC BY-SA 4.0 |
 | [Wikipedia](https://en.wikipedia.org) | Editors' `Compositions for …` lists: evidence a work is notable, and works IMSLP lacks (often still in copyright). | CC BY-SA 4.0 |
 | [Wikidata](https://www.wikidata.org) | The links between the others (IMSLP pages, Wikipedia articles, MusicBrainz works), composition dates, composers' lifespans; works tagged with an ensemble. | CC0 |
 | [Open Opus](https://openopus.org) | Curated main works of well-known composers, marked popular or recommended. | CC0 |
 | [MusicBrainz](https://musicbrainz.org) | Recording counts (core data only). | CC0 |
 | [Mutopia](https://www.mutopiaproject.org) | Free engraved editions, linked from the works they belong to (often single movements, so links, not works). | links only |
-| [LIBRIS](https://libris.kb.se) | The sheet music held by Musik- och teaterbiblioteket, Stockholm (lends scores and parts in Sweden): links to borrow works we have, and works we lacked when the library states their instrumentation. | CC0 |
+| [LIBRIS](https://libris.kb.se) | The sheet music held by Musik- och teaterbiblioteket, Stockholm (lends scores and parts in Sweden): links to borrow works we have, and works we lacked when the library states their instrumentation, in its own field or in the title ("variationer för blåskvintett"). | CC0 |
 | [GND](https://www.dnb.de/gnd) | The German National Library's musical works: instrumentation as structured data, opus and catalogue numbers, keys, dates; contemporary works too. | CC0 |
 | [RISM](https://rism.online) | Manuscripts and early prints and the libraries holding them: where copies of works we have are kept, and how many libraries have one; the parts of a copy give an orchestral work's scoring. | CC BY 3.0 |
 
@@ -25,7 +25,7 @@ Next in line: more libraries. Sources without an open license (publishers, music
 | Stage | Fetches | Refreshed |
 |---|---|---|
 | `imslp` | all ~11k `For …` categories and their works, with era and recording tags | when a category's size changes, else after 30–90 days |
-| `imslp-pages` | every IMSLP work page's text, 50 a request; only the fields we use are kept (Instrumentation, movements, duration, and the part names of the original edition, not arrangements) | after 60–120 days |
+| `imslp-pages` | every IMSLP work page's text, 50 a request; only the fields we use are kept (Instrumentation, movements, duration, the part names of the original edition, and each arrangement's headings, arranger and license); pages read before a field was kept are read again | after 60–120 days |
 | `wikipedia` | the `Compositions for …` categories mapped in `crawler/ensembles.ts` | weekly |
 | `wikidata` | composers and works with IMSLP ids, works tagged with an ensemble, details for Wikipedia-listed works; follows IMSLP redirects for renamed pages. Dates only when precise to the year. | weekly |
 | `openopus` | the full work dump | weekly |
@@ -50,10 +50,11 @@ The guiding rule: **a work is listed for a line-up only when a source says it's 
 3. **Works** from other sources are matched to IMSLP works by shared ids first (Wikidata's IMSLP id), then within a composer by catalogue number (Op., K., BWV, D., Hob. and two dozen more; exact sub-numbers first), key and title once numbers and keys are set aside. Different keys or different numbers in the same catalogue mean different works; ties and ambiguity mean no match.
 4. **Works IMSLP lacks** come in only when a source states a line-up: a Wikipedia ensemble category, a Wikidata ensemble tag whose instruments all fit, or an Open Opus title naming a standard ensemble ("String Quartet no. 3", but not "…, for soprano and string quartet"). A title naming a group size must agree with it, and IMSLP's own categories always win.
 5. **Links only**: Mutopia editions attach to the work they're from; LIBRIS records of works we have add a link to borrow them. Composers from these match on surname and life dates (within a year).
-6. **New works from libraries and authority files** come in with care. LIBRIS: when the library's instrumentation is explicit and fully understood, and it's not an arrangement or an anthology; later editions match the uniform title. GND: when its instrumentation maps to ours and the work can't duplicate one we have (no work of the same title, and none for that line-up, unless all of those carry different numbers).
+6. **New works from libraries and authority files** come in with care. LIBRIS: when the instrumentation is fully understood, from the library's field or spelled out in the title after "för", "for", "für", "pour" or "per" (Swedish, English, Danish and Norwegian, German, French, Italian; every word must be known), and it's not an arrangement, reduction or anthology. When the field and the title name different instruments the edition is probably an arrangement, and neither counts. Titles less their line-up ("Danzas argentinas, pour piano") match works we have for that line-up, unless that leaves only a genre ("Sonat"); later editions match the uniform title, or that title and line-up. GND: when its instrumentation maps to ours and the work can't duplicate one we have (no work of the same title, and none for that line-up, unless all of those carry different numbers).
 7. **RISM** adds copies, never works: a source matches a work of the same composer (via GND or Wikidata ids) by catalogue number or title. A work shows up to three copies, the composer's own hand first, then prints, and counts the libraries holding one.
 8. **An orchestra's scoring** (`2.2.2.2 – 4.2.3.1 – timp – str`) is read from IMSLP's part names ("Flute 1, 2", "Horn 3/4", "Alto Trombone"), and its Instrumentation field where it lists instruments, each instrument at the larger of the two counts, since uploads often lack parts and descriptions often leave out percussion. Works IMSLP has none for take the scoring most of their RISM copies agree on. It's kept only for works written for orchestra, and only when it reads as a whole orchestra (strings and some winds, brass or timpani): a string section alone usually means only the string parts were uploaded. String orchestra works need no scoring: they need strings.
 9. **Titles other sources use** are kept as aliases, so a search for "Dvořák American" finds IMSLP's "String Quartet No.12, Op.96".
+10. **Arrangements** come from the headings on IMSLP's work pages ("Overture" › "For Flute, Oboe, Clarinet, Bassoon and Horn (Jerkert)") and their Arranger fields: the arranger, the excerpt if it isn't the whole work, and the line-up when it's one of those IMSLP lists the work as arranged for. Arrangers are searchable, so a search for one finds the works they arranged.
 
 ## Rank
 
@@ -74,12 +75,13 @@ One SQLite database, the same in the downloads and in D1. Its tables (columns ar
 | `lineups` | each line-up (`cello,viola,violin*2`), its players, counts of original and arrangement-only works, and the categories that define it |
 | `scorings` | which works are for which line-ups, original or arrangement, and which sources say so |
 | `orchestrations` | an orchestral work's scoring in the shorthand, its instruments, players per section (auxiliaries counted in their section) for "can our orchestra play it", and where it was read |
+| `arrangements` | IMSLP's arrangements of a work: arranger, excerpt, line-up, heading and license |
 | `links` | where to find works and composers: free sheet music (IMSLP, Mutopia), library copies (LIBRIS, RISM), articles, database records (Wikidata, GND, MusicBrainz), by provider and the provider's own id |
 | `lineup_facets` | for line-ups of 500 works or more, the unfiltered list's facets and total, counted ahead by the API's own code, so a big line-up's first view needn't count |
 | `redirects` | ids merged into others |
 | `sources` | each source's fetch time, records pulled, matched and added, and license |
 | `meta` | version, build time, counts, stats |
-| `works_fts`, `composers_fts` | full-text search (titles, aliases, names, catalogue numbers), folded to plain ASCII |
+| `works_fts`, `composers_fts` | full-text search (titles, aliases, names, catalogue numbers, arrangers), folded to plain ASCII |
 
 A line-up key lists instrument ids alphabetically, `*N` for several players. Groups that vary in size are single ids ("orchestra", "strings", "mixed chorus").
 

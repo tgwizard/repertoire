@@ -582,6 +582,18 @@ a.load-error-retry {
   opacity: 0.45;
 }
 
+/* On or off whatever else is picked, so not one of the choices before it: "+" adds, "✓" is on */
+/* Not read out: aria-pressed says it */
+.toggle-chip::before {
+  content: "+ ";
+  content: "+ " / "";
+}
+
+.toggle-chip.active::before {
+  content: "✓ ";
+  content: "✓ " / "";
+}
+
 .era-count {
   opacity: 0.6;
   font-variant-numeric: tabular-nums;
@@ -1138,10 +1150,24 @@ code {
   margin-top: 0;
 }
 
-.lineup-tag {
+.lineup-tag,
+.arranged-tag {
   font-size: 0.82rem;
   color: var(--muted);
   margin-right: 4px;
+}
+
+.arranged-tag {
+  font-style: italic;
+}
+
+.scorings .arranged-tag,
+.arranged-line .arranged-tag {
+  display: block;
+}
+
+.arranged-line {
+  margin-top: 6px;
 }
 
 /* ---- Loading: the list and its count dim, and a pill floats over the list's top ---- */

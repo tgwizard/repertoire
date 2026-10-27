@@ -202,6 +202,27 @@ test("LIBRIS: works we have can be borrowed in Stockholm; Swedish works come in"
   assert.ok((meta.sources.libris?.added ?? 0) > 2000, `only ${meta.sources.libris?.added} works added from LIBRIS`);
 });
 
+test("works people found missing: a Swedish wind quintet; one arranger's arrangements", async () => {
+  // Robert Sund's Per spelman: in LIBRIS, its line-up only in the title ("variationer för blåskvintett")
+  const sund = await api<WorksPage>(`/api/works?lineup=${key(WIND_QUINTET)}&q=${encodeURIComponent("per spelman")}`);
+  assert.ok(sund.works.some((w) => w.composer?.name === "Robert Sund"), "Per spelman not listed for wind quintet");
+  // Rossini's quartets for flute, clarinet, horn and bassoon, from a German title
+  const rossini = await api<WorksPage>(`/api/works?lineup=${key("flute,clarinet,horn,bassoon")}&q=rossini`);
+  assert.ok(rossini.total > 0, "Rossini's wind quartets missing");
+  // Jesper Jerkert's arrangements for wind quintet on IMSLP, found by his name, saying of what
+  const found = await api<WorksPage>("/api/works?q=jerkert&sort=relevance&limit=50&arrangements=1");
+  const his = found.works.filter((w) => w.arrangedBy?.some((a) => a.arranger === "Jesper Jerkert"));
+  assert.ok(his.length >= 10, `only ${his.length} of Jerkert's arrangements found`);
+  // Without arrangements, his own work, and a count of what arrangements would add
+  const own = await api<WorksPage>("/api/works?q=jerkert&sort=relevance&facets=1");
+  assert.ok(own.works.every((w) => w.composer?.name === "Jesper Jerkert") && own.facets!.arrangements! >= 10, JSON.stringify(own.facets));
+  const cosi = await api<WorksPage>(`/api/works?lineup=${key(WIND_QUINTET)}&arrangements=1&q=${encodeURIComponent("cosi fan tutte")}`);
+  assert.ok(
+    cosi.works.some((w) => w.arrangedBy?.some((a) => a.arranger === "Jesper Jerkert" && a.excerpt === "Overture")),
+    JSON.stringify(cosi.works.map((w) => w.arrangedBy)),
+  );
+});
+
 test("GND: instrumentation for works IMSLP can't have, without doubling composers", async () => {
   const { composers, works } = await search("julian anderson quartet");
   assert.ok(works.some((x) => /^Quartet No\. 1/.test(x.title) && x.lineup === key(STRING_QUARTET)), "Julian Anderson's first quartet missing");

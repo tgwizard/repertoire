@@ -6,13 +6,11 @@ interface Props {
   count: (e: Ensemble) => number;
   ensemble: Ensemble;
   onChange: (e: Ensemble) => void;
-  includeArr: boolean;
-  onIncludeArrChange: (v: boolean) => void;
 }
 
 const fmt = new Intl.NumberFormat("en");
 
-export function EnsembleBuilder({ count, ensemble, onChange, includeArr, onIncludeArrChange }: Props) {
+export function EnsembleBuilder({ count, ensemble, onChange }: Props) {
   const parts = scoreOrder(ensemble);
   const currentKey = ensembleKey(ensemble);
   // Only matters on narrow screens, where the picker collapses so results come first.
@@ -73,17 +71,13 @@ export function EnsembleBuilder({ count, ensemble, onChange, includeArr, onInclu
             })}
           </ul>
         )}
-        <div className="ensemble-card-foot">
-          <label className="toggle">
-            <input type="checkbox" checked={includeArr} onChange={(e) => onIncludeArrChange(e.target.checked)} />
-            <span>Include arrangements</span>
-          </label>
-          {parts.length > 0 && (
+        {parts.length > 0 && (
+          <div className="ensemble-card-foot">
             <button className="picker-toggle" onClick={() => (pickerOpen ? closePicker() : setPickerOpen(true))} aria-expanded={pickerOpen}>
               {!pickerOpen ? "Change line-up" : total > 0 ? `Show ${fmt.format(total)} ${total === 1 ? "work" : "works"}` : "Done"}
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </section>
 
       <div className={`picker${pickerOpen ? "" : " collapsed"}`}>

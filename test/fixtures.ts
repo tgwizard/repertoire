@@ -37,6 +37,8 @@ export function fixtureInput(later = false): BuildInput {
         "For 1 player": [8],
         "For orchestra": [20, 21, 23],
         "For strings": [22],
+        "For flute, oboe, clarinet, bassoon, horn (arr)": [22],
+        "For piano 4 hands (arr)": [22],
       },
       works: {
         1: imslpWork(1, "String Quartet in G minor, Op.10 (Debussy, Claude)", "Romantic", true),
@@ -73,6 +75,18 @@ export function fixtureInput(later = false): BuildInput {
         },
         // Only the string parts are on IMSLP: not a whole orchestra's scoring
         23: { at: T, rev: 1, instrumentation: "orchestra", parts: [["Violins I", "Violins II", "Violas", "Cellos", "Basses"]] },
+        // Arrangements: of the whole work, of a movement, and for a line-up the work isn't listed for
+        22: {
+          at: T,
+          rev: 1,
+          v: 2,
+          arrangements: [
+            // By a composer we have: on their page too
+            { headings: ["Complete", "For Piano 4 hands (Brahms)"], arranger: "{{LinkArr|Johannes|Brahms}}", copyright: "Public Domain" },
+            { headings: ["Waltz (No.2)", "*For Flute, Oboe, Clarinet, Bassoon and Horn (Jerkert)"], arranger: "{{LinkArr|Jesper|Jerkert||}}", copyright: "Creative Commons Attribution-NonCommercial 4.0" },
+            { headings: ["Complete", "For Theatre Orchestra"], arranger: "Unknown", copyright: "Public Domain" },
+          ],
+        },
       },
     },
     eras: {},
@@ -149,7 +163,7 @@ export function fixtureInput(later = false): BuildInput {
     },
     libris: {
       fetchedAt: T,
-      total: 4,
+      total: 6,
       records: [
         // An edition of a work IMSLP has: a link to borrow it.
         libris("lb115", "Quintett für Klarinette, zwei Violinen, Viola und Violoncello, op. 115", "Kvintett, op. 115", "Brahms", "Johannes", 1833, 1897, ["klarinett, violin (2), viola, violoncell"], "1 part. + 5 st."),
@@ -159,6 +173,10 @@ export function fixtureInput(later = false): BuildInput {
         libris("lbkv2", "Kongsgaard variations", "Kongsgaard variations", "Hillborg", "Anders", 1954, null, ["violin (2), viola, violoncell"], "4 st."),
         // An arrangement we can't place: skipped.
         { ...libris("lbarr", "Wind Quintet, arr. for brass", null, "Nobody", "A.", 1900, 1980, ["trumpet (2), horn, trombon, tuba"], "5 st."), arranged: true },
+        // A line-up only the title gives: comes in.
+        libris("lbps", "Per spelman, variationer för blåskvintett", null, "Sund", "Robert", 1942, null, [], "1 part. (14 s.) + 5 st."),
+        // A title and an instrumentation that disagree (an edition for flute): skipped.
+        libris("lbpt", "Partita d-Moll für Klarinette solo", null, "Nobody", "B.", 1920, 1990, ["flöjt"], "1 st."),
       ],
     },
     mutopia: {

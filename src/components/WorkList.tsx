@@ -2,7 +2,14 @@ import { composerPath, lifespan, workPath } from "../lib/api";
 import { formatDuration } from "../shared/paths";
 import { describe, parseEnsembleKey } from "../lib/instrumentation";
 import { Link } from "../lib/router";
-import { CORE_SCORE, type WorkSummary } from "../shared/data";
+import { CORE_SCORE, type ArrangedBy, type WorkSummary } from "../shared/data";
+
+/** "arr. Jesper Jerkert for flute, oboe, … · Overture"; nothing when there's nothing to say */
+export function arrangedText(a: ArrangedBy): string | null {
+  if (!a.arranger && !a.excerpt && !a.lineup) return null;
+  const who = [`arr. ${a.arranger ?? "unknown"}`, a.lineup && `for ${a.lineup}`].filter(Boolean).join(" ");
+  return a.excerpt ? `${who} · ${a.excerpt}` : who;
+}
 
 interface Props {
   works: WorkSummary[];
@@ -23,6 +30,7 @@ export function WorkList({ works, lineup, showLineup, onComposer, groupByPlayers
         const heading = groupByPlayers && w.players !== lastPlayers ? w.players : null;
         lastPlayers = w.players;
         const other = showLineup || (lineup && w.lineup !== lineup);
+        const arranged = (w.arrangedBy ?? []).map(arrangedText).filter((t): t is string => !!t);
         return (
           <li key={`${w.id}:${w.lineup}`} className="work">
             {heading !== null && (
@@ -74,6 +82,15 @@ export function WorkList({ works, lineup, showLineup, onComposer, groupByPlayers
                 </span>
               )}
             </div>
+            {arranged.length > 0 && (
+              <div className="arranged-line" title="Who arranged it, according to IMSLP">
+                {arranged.map((t) => (
+                  <span key={t} className="arranged-tag">
+                    {t}
+                  </span>
+                ))}
+              </div>
+            )}
           </li>
         );
       })}

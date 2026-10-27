@@ -38,11 +38,13 @@ import { bareTitle, catalogueKeys, ComposerIndex, displayName, matchWork, musica
 import type { ComposerErasStage, ImslpStage } from "./sources/imslp.ts";
 import type { MusicBrainzStage } from "./sources/musicbrainz.ts";
 import { mutopiaUrl, type MutopiaStage } from "./sources/mutopia.ts";
-import { librisHolding, librisLineup, librisUrl, type LibrisStage } from "./sources/libris.ts";
+import { librisHolding, librisLineup, librisRecordLineup, librisUrl, type LibrisStage } from "./sources/libris.ts";
+import { ANTHOLOGY, onlyGenre, withoutLineup } from "./title-lineup.ts";
 import { gndLineup, gndMatchTitle, gndTitle, gndUrl, type GndStage } from "./sources/gnd.ts";
 import { rismMatchTitle, rismPersonUrl, rismRank, rismUrl, type RismStage } from "./sources/rism.ts";
 import type { OpenOpusStage } from "./sources/openopus.ts";
 import { parseDuration, parseMovements, type ImslpPagesStage } from "./sources/imslp-pages.ts";
+import { readArrangements, THE_COMPOSER, type Arrangement } from "./arrangements.ts";
 import { isFullOrchestra, mergeOrchestrations, orchestrationFromParts, orchestrationFromRism, orchestrationFromText } from "./orchestration.ts";
 import { formatOrchestration, orchestraColumns, type Orchestration } from "../src/lib/orchestration.ts";
 import type { WdWork, WikidataStage } from "./sources/wikidata.ts";
@@ -107,6 +109,8 @@ interface BuildWork {
   imslp?: { pageid: number; title: string };
   /** The LIBRIS record a work was created from */
   libris?: string;
+  /** Its title less the line-up it spells out, for later sources to match ("Como una fantasía") */
+  bareTitle?: string;
   /** German National Library work id */
   gnd?: { id: string; source: SourceId };
   wikidata?: string;
@@ -124,6 +128,8 @@ interface BuildWork {
   /** Seconds */
   duration?: number;
   movements?: number;
+  /** IMSLP's arrangements of it */
+  arrangements?: Arrangement[];
   /** Links from sources that only point at the work (Mutopia editions…) */
   extraLinks: { provider: ProviderId; ref: string; url: string | null; label: string | null; source: SourceId }[];
 }
@@ -309,7 +315,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     }
   }
 
-  // ---- 1b. IMSLP work pages: duration, movements, an orchestra's scoring ------------
+  // ---- 1b. IMSLP work pages: duration, movements, an orchestra's scoring, arrangements ----
   // The scoring comes from the part names of the original editions (parts uploaded on
   // their own add what a whole set lacks, unless they're stand-ins: a bass clarinet for
   // the bassoons), and from the Instrumentation field, each instrument at its largest
@@ -326,6 +332,9 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     const text = page.instrumentation && orchestrationFromText(page.instrumentation);
     if (text) readings.push(text.orchestration);
     if (readings.length) w.orchestration = { o: mergeOrchestrations(readings), source: "imslp", ref: String(w.imslp!.pageid) };
+    // Matched against the line-ups IMSLP lists the work as arranged for
+    const arranged = new Set([...w.ensembles].filter(([, m]) => m.arr).map(([k]) => k));
+    if (page.arrangements) w.arrangements = readArrangements(page.arrangements, arranged);
   }
 
   // ---- 2. Wikidata: composers, and links for IMSLP works -------------------
@@ -525,27 +534,33 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
   // ---- 8. LIBRIS ----------------------------------------------------------------
   // Musik- och teaterbiblioteket's sheet music. A record of a work we have adds a link
   // to borrow it. A record of a work we don't have adds the work when its instrumentation
-  // is explicit and fully understood, and it isn't an arrangement or an anthology;
+  // (in its field, or spelled out in its title) is fully understood, agrees with any group
+  // size the title names, and it isn't an arrangement or an anthology;
   // further editions of it then match it. Composers match on surname and birth year.
-  // Works made from LIBRIS records, by composer and the library's uniform title, so later
-  // editions find them whatever their printed titles say.
+  // Works made from LIBRIS records, by composer and the library's uniform title (else the
+  // title less its line-up, and the line-up), so later editions find them whatever their
+  // printed titles say.
   const fromLibris = new Map<string, BuildWork>();
-  const uniformKey = (composerKey: string, uniform: string | null) => (uniform ? `${composerKey}|${normalize(uniform)}` : null);
   for (const r of libris?.records ?? []) {
     if (r.collection || r.composers.length !== 1) continue;
     const lc = r.composers[0]!;
     if (!lc.born) continue;
     const found = (bySurname.get(surnameKey(lc.family)) ?? []).filter((c) => near(c.born, lc.born) && (!lc.died || !c.died || near(c.died, lc.died)));
     let c: BuildComposer | null = found.length === 1 ? found[0]! : null;
-    const titles = [r.uniform, r.title].filter((t): t is string => !!t);
+    const lineup = r.arranged || ANTHOLOGY.test(r.title) ? null : librisRecordLineup(r);
+    // The title less its line-up ("Danzas argentinas, pour piano"), when that still names a
+    // work rather than a genre ("Sonat"), is matched too, against works for the line-up
+    const less = lineup && withoutLineup(r.title);
+    const bare = less && !onlyGenre(less) ? less : null;
+    const editionKey = (ck: string) => (r.uniform ? `${ck}|${normalize(r.uniform)}` : bare ? `${ck}|${lineup}|${normalize(bare)}` : null);
     let w: BuildWork | null = null;
-    if (c) w = fromLibris.get(uniformKey(c.key, r.uniform) ?? "") ?? null;
-    if (c && !w) for (const t of titles) if ((w = matchWork(t, byComposer.get(c.key) ?? []))) break;
+    if (c) w = fromLibris.get(editionKey(c.key) ?? "") ?? null;
+    if (c && !w) for (const t of [r.uniform, r.title]) if (t && (w = matchWork(t, byComposer.get(c.key) ?? []))) break;
+    if (c && !w && bare) w = matchWork(bare, (byComposer.get(c.key) ?? []).filter((x) => x.ensembles.has(lineup!)));
     if (w) {
       stats.matched.libris++;
     } else {
-      const lineup = r.arranged ? null : librisLineup(r.medium);
-      if (!lineup || found.length > 1) continue;
+      if (!lineup || found.length > 1 || !titleFitsPlayers(r.title, parseEnsembleKey(lineup))) continue;
       if (!c) {
         const key = `libris:${lc.agent ?? normalize(`${lc.family} ${lc.given ?? ""} ${lc.born}`)}`;
         c = composer(key, () => ({ name: [lc.given, lc.family].filter(Boolean).join(" "), born: lc.born ?? undefined, died: lc.died ?? undefined }));
@@ -554,10 +569,12 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
       }
       w = newWork(`libris:${r.id}`, r.title || r.uniform!, c.key);
       w.libris = r.id;
+      if (bare) w.bareTitle = bare;
       if (r.uniform) w.aliases.add(r.uniform);
       addWork(w);
-      addMembership(w, parseEnsembleKey(lineup), false, "libris", r.medium[0]!);
-      const k = uniformKey(c.key, r.uniform);
+      // Where it says so: the instrumentation field, or the title
+      addMembership(w, parseEnsembleKey(lineup), false, "libris", librisLineup(r.medium) === lineup ? r.medium[0]! : r.title);
+      const k = editionKey(c.key);
       if (k) fromLibris.set(k, w);
       stats.added.libris++;
     }
@@ -603,7 +620,9 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     // The same title as one of the composer's works, with no key or number saying
     // otherwise, is that work (IMSLP often files choral works under a generic line-up).
     const numbers = catalogueKeys(gndMatchTitle(g));
-    const sameTitle = (byComposer.get(composerKey) ?? []).filter((x) => sameWorkByTitle(x.title, title, numbers));
+    const sameTitle = (byComposer.get(composerKey) ?? []).filter(
+      (x) => sameWorkByTitle(x.title, title, numbers) || (x.bareTitle && x.ensembles.has(ensembleKey(parts)) && sameWorkByTitle(x.bareTitle, title, numbers)),
+    );
     if (sameTitle.length === 1) {
       const same = sameTitle[0]!;
       stats.matched.gnd++;
@@ -727,6 +746,8 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
       ...w.extraLinks.filter((l) => l.provider === "gnd").map((l) => `gnd:${l.ref}`),
       w.openopus && `openopus:${w.openopus}`,
       w.libris && `libris:${w.libris}`,
+      // A record that made a work of its own before may now be an edition of another
+      ...w.extraLinks.filter((l) => l.provider === "libris").map((l) => `libris:${l.ref}`),
     ].filter((a): a is string => !!a);
   const workIds = assignIds(workList.map(workAnchors), previous.work, WORK_SCHEMES);
 
@@ -743,7 +764,8 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
   const insertLink = db.prepare("INSERT INTO links VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
   const insertLineup = db.prepare("INSERT INTO lineups VALUES (?, ?, ?, ?, ?, ?)");
   const insertRedirect = db.prepare("INSERT INTO redirects VALUES (?, ?, ?)");
-  const insertWorkFts = db.prepare("INSERT INTO works_fts (rowid, title, composer, aliases, keys) VALUES (?, ?, ?, ?, ?)");
+  const insertWorkFts = db.prepare("INSERT INTO works_fts (rowid, title, composer, aliases, keys, arrangers) VALUES (?, ?, ?, ?, ?, ?)");
+  const insertArrangement = db.prepare("INSERT INTO arrangements VALUES (?, ?, ?, ?, ?, ?, ?)");
   const insertComposerFts = db.prepare("INSERT INTO composers_fts (rowid, name) VALUES (?, ?)");
   const insertOrchestration = db.prepare(`INSERT INTO orchestrations VALUES (${Array(19).fill("?").join(", ")})`);
 
@@ -838,6 +860,8 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
       lineupCounts.set(key, counts);
     }
 
+    (w.arrangements ?? []).forEach((a, i) => insertArrangement.run(id, a.lineup, a.arranger, a.excerpt, a.heading, a.license, i));
+
     if (w.imslp) link("work", id, "imslp", String(w.imslp.pageid), imslpUrl(w.imslp.title), "imslp");
     if (w.wikipedia) link("work", id, "wikipedia", w.wikipedia.title, wikipediaUrl(w.wikipedia.title), w.wikipedia.source);
     if (w.wikidata) link("work", id, "wikidata", w.wikidata, wikidataUrl(w.wikidata), "wikidata");
@@ -853,7 +877,8 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     // Folded to ASCII words, like search queries (see worker/queries.ts); keys add the
     // compact catalogue forms people type ("k581", "bwv1007", "op18").
     const keys = [...catalogueKeys(w.title)].map((k) => k.split("/")[0]!.replaceAll(":", ""));
-    insertWorkFts.run(n, own, c ? ftsNames(c) : "", aliases.map(normalize).join(" "), [...new Set(keys)].join(" "));
+    const arrangers = new Set((w.arrangements ?? []).map((a) => a.arranger).filter((a): a is string => !!a && a !== THE_COMPOSER).map(normalize));
+    insertWorkFts.run(n, own, c ? ftsNames(c) : "", aliases.map(normalize).join(" "), [...new Set(keys)].join(" "), [...arrangers].join(" "));
   });
 
   for (const key of [...lineupCounts.keys()].sort()) {
@@ -879,7 +904,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
         items: Object.keys(imslp.works).length,
         matched: null,
         added: workList.filter((w) => w.imslp).length,
-        note: `${Object.keys(imslp.members).length} instrumentation categories; ${Object.keys(imslpPages?.pages ?? {}).length} work pages read for durations, movements and orchestral parts`,
+        note: `${Object.keys(imslp.members).length} instrumentation categories; ${Object.keys(imslpPages?.pages ?? {}).length} work pages read for durations, movements, orchestral parts and arrangers`,
       },
       wikipedia: {
         fetchedAt: iso(wiki?.fetchedAt),
@@ -990,6 +1015,7 @@ function datasetStats(db: DatabaseSync): DatasetStats {
     orchestrations: Object.fromEntries(all("SELECT source, COUNT(*) AS n FROM orchestrations GROUP BY source").map((r) => [r.source, r.n])),
     durations: one("SELECT COUNT(duration) AS n FROM works").n,
     movements: one("SELECT COUNT(movements) AS n FROM works").n,
+    arrangements: (({ n, arrangers }) => ({ n, arrangers }))(one("SELECT COUNT(*) AS n, COUNT(DISTINCT arranger) AS arrangers FROM arrangements")),
     bySource,
     links: Object.fromEntries(all("SELECT provider, COUNT(*) AS n FROM links WHERE entity = 'work' GROUP BY provider").map((r) => [r.provider, r.n])) as DatasetStats["links"],
     eras: Object.fromEntries(all("SELECT era, COUNT(*) AS n FROM works GROUP BY era ORDER BY n DESC").map((r) => [r.era ?? "Unknown", r.n])),

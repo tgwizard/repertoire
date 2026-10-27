@@ -19,7 +19,7 @@ const CC_BY_SA = "https://creativecommons.org/licenses/by-sa/4.0/";
 const CC0 = "https://creativecommons.org/publicdomain/zero/1.0/";
 
 export const SOURCES: Record<SourceId, SourceInfo> = {
-  imslp: { name: "IMSLP", url: "https://imslp.org", license: "CC BY-SA 4.0", licenseUrl: CC_BY_SA, role: "Instrumentation, works and sheet music; orchestral scorings, durations" },
+  imslp: { name: "IMSLP", url: "https://imslp.org", license: "CC BY-SA 4.0", licenseUrl: CC_BY_SA, role: "Instrumentation, works and sheet music; orchestral scorings, durations, arrangers" },
   wikipedia: { name: "Wikipedia", url: "https://en.wikipedia.org", license: "CC BY-SA 4.0", licenseUrl: CC_BY_SA, role: "Curated “Compositions for …” lists" },
   wikidata: { name: "Wikidata", url: "https://www.wikidata.org", license: "CC0", licenseUrl: CC0, role: "Links between sources, dates" },
   openopus: { name: "Open Opus", url: "https://openopus.org", license: "CC0", licenseUrl: CC0, role: "Popular and recommended works" },
@@ -174,6 +174,31 @@ export interface WorkSummary {
   movements: number | null;
   /** An orchestral work's scoring: "2.2.2.2 – 4.2.3.1 – timp – str" */
   orchestration: string | null;
+  /**
+   * Who arranged it (on IMSLP): on a line-up's list, the row's arrangements for it; in a
+   * search, those by an arranger searched for, with the line-up described
+   */
+  arrangedBy?: ArrangedBy[];
+}
+
+export interface ArrangedBy {
+  /** "Jesper Jerkert", "the composer"; null when unknown */
+  arranger: string | null;
+  /** What's arranged when it isn't the whole work: "Overture" */
+  excerpt: string | null;
+  /** In a search: "flute, oboe, clarinet, bassoon and horn" */
+  lineup?: string;
+}
+
+/** An arrangement on IMSLP */
+export interface ArrangementDetail {
+  /** The line-up key, when it's one of the work's */
+  lineup: string | null;
+  arranger: string | null;
+  excerpt: string | null;
+  /** IMSLP's heading: "For Flute, Oboe, Clarinet, Bassoon and Horn (Jerkert)" */
+  heading: string;
+  license: string | null;
 }
 
 /** Where an orchestral work's scoring was read */
@@ -212,6 +237,8 @@ export interface WorkDetail {
   movements: number | null;
   orchestration: OrchestrationDetail | null;
   scorings: Scoring[];
+  /** IMSLP's arrangements, in page order */
+  arrangements: ArrangementDetail[];
   links: Link[];
 }
 
@@ -222,6 +249,8 @@ export interface ComposerDetail extends ComposerRef {
   links: Link[];
   /** Line-ups with the composer's works, most first */
   lineups: { key: string; description: string; count: number }[];
+  /** Other composers' works they arranged (IMSLP's arrangers, by name) */
+  arranged: number;
 }
 
 /** Length filters, in minutes: from (inclusive) to (exclusive), 0 for open-ended */
@@ -244,6 +273,9 @@ export interface Facets {
   lineups: { key: string; description: string; players: number; count: number }[];
   core: number;
   free: number;
+  /** Works only arranged for the line-up(s), with the other filters: what including
+   * arrangements adds, or added (absent in datasets before 2026-10-27) */
+  arrangements?: number;
 }
 
 export interface WorksPage {
@@ -292,6 +324,8 @@ export interface DatasetStats {
   /** Works with a duration, and with a number of movements */
   durations?: number;
   movements?: number;
+  /** IMSLP arrangements read, and the arrangers among them */
+  arrangements?: { n: number; arrangers: number };
   /** Per source: line-up assignments it vouches for, and links it gave */
   bySource: Record<SourceId, { lineups: number; links: number }>;
   links: Record<ProviderId, number>;

@@ -13,7 +13,7 @@ const pct = (part: number, whole: number) => `${Math.round((100 * part) / Math.m
 /** What each source is used for, in a sentence. */
 const USE: Record<SourceId, string> = {
   imslp:
-    "The backbone. Every IMSLP work page sits in categories named after its exact instrumentation (“For 2 violins, viola, cello”), with arrangements in separate categories. We crawl all of them, and link to IMSLP for the sheet music.",
+    "The backbone. Every IMSLP work page sits in categories named after its exact instrumentation (“For 2 violins, viola, cello”), with arrangements in separate categories. We crawl all of them, and link to IMSLP for the sheet music. Its work pages add durations, orchestral scorings, and who arranged what.",
   wikipedia:
     "Editors' lists of notable works per ensemble (“Compositions for wind quintet”). They add works IMSLP lacks, usually 20th-century works still in copyright, and count towards how established a work is.",
   wikidata:
@@ -25,7 +25,7 @@ const USE: Record<SourceId, string> = {
   rism:
     "The International Inventory of Musical Sources catalogues manuscripts and early prints in libraries worldwide. For works we have, it shows where copies are kept (the composer's own hand first), and how many libraries hold one, which says how widely a work was played before recordings.",
   libris:
-    "The Swedish union catalogue. We take the sheet music held by Musik- och teaterbiblioteket in Stockholm, which lends scores and parts (orchestral sets too) across Sweden: works we have get a link to borrow them, and works we didn't have, often Swedish, come in when the library states their instrumentation.",
+    "The Swedish union catalogue. We take the sheet music held by Musik- och teaterbiblioteket in Stockholm, which lends scores and parts (orchestral sets too) across Sweden: works we have get a link to borrow them, and works we didn't have, often Swedish, come in when the library states their instrumentation, in its own field or in the title (“variationer för blåskvintett”).",
   mutopia:
     "Volunteers' new engravings of public-domain music, free to download. Each piece is linked from the work it belongs to; many are single movements, so Mutopia adds links, not works.",
 };
@@ -99,6 +99,14 @@ export function AboutPage() {
                   <div>
                     <dt>With a duration</dt>
                     <dd>{n(s.durations)}</dd>
+                  </div>
+                )}
+                {s.arrangements && (
+                  <div>
+                    <dt>Arrangements on IMSLP</dt>
+                    <dd>
+                      {n(s.arrangements.n)} <span className="muted small">by {n(s.arrangements.arrangers)} arrangers</span>
+                    </dd>
                   </div>
                 )}
               </>

@@ -2,8 +2,9 @@
 // Musik- och teaterbiblioteket (library code X, formerly Statens musikbibliotek),
 // which lends scores and parts, orchestral sets included, throughout Sweden.
 
-import { ensembleKey, type Ensemble } from "../../src/lib/instrumentation.ts";
+import { ensembleKey, parseEnsembleKey, playerCount, type Ensemble } from "../../src/lib/instrumentation.ts";
 import { cached, fetchJson, jitteredMaxAge, progress, writeStage } from "../http.ts";
+import { instrumentsNamed, lineupFromTitle, SWEDISH } from "../title-lineup.ts";
 
 const PAGE = 200;
 const SEARCH =
@@ -105,25 +106,6 @@ export function extractRecord(item: any): LibrisRecord | null {
   };
 }
 
-// Instruments as LIBRIS names them (Swedish), → our instrument ids.
-const SWEDISH: Record<string, string> = {
-  flöjt: "flute", tvärflöjt: "flute", piccolaflöjt: "piccolo", piccola: "piccolo", altflöjt: "alto flute", blockflöjt: "recorder",
-  oboe: "oboe", "oboe d'amore": "oboe damore", "engelskt horn": "english horn", klarinett: "clarinet", bassetthorn: "basset horn",
-  basklarinett: "bass clarinet", fagott: "bassoon", kontrafagott: "contrabassoon", sopransaxofon: "soprano saxophone",
-  altsaxofon: "alto saxophone", tenorsaxofon: "tenor saxophone", barytonsaxofon: "baritone saxophone", saxofon: "saxophone",
-  horn: "horn", valthorn: "horn", trumpet: "trumpet", kornett: "cornet", flygelhorn: "flugelhorn", trombon: "trombone",
-  basun: "trombone", bastrombon: "bass trombone", basbasun: "bass trombone", eufonium: "euphonium", tuba: "tuba",
-  violin: "violin", fiol: "violin", viola: "viola", altfiol: "viola", violoncell: "cello", cello: "cello", kontrabas: "double bass",
-  "viola da gamba": "viol", gamba: "viol", harpa: "harp", gitarr: "guitar", luta: "lute", mandolin: "mandolin",
-  piano: "piano", "piano 4 händer": "piano 4 hands", "piano fyrhändigt": "piano 4 hands", cembalo: "harpsichord", orgel: "organ",
-  harmonium: "harmonium", dragspel: "accordion", ackordeon: "accordion", celesta: "celesta", continuo: "continuo",
-  "basso continuo": "continuo", generalbas: "continuo", "b.c.": "continuo", "b.c": "continuo", bc: "continuo", slagverk: "percussion", pukor: "timpani", puka: "timpani",
-  marimba: "marimba", vibrafon: "vibraphone", sång: "voice", röst: "voice", sopran: "soprano", alt: "alto", tenor: "tenor",
-  baryton: "baritone", berättare: "narrator", recitation: "narrator", "blandad kör": "mixed chorus", kör: "mixed chorus",
-  manskör: "male chorus", damkör: "female chorus", orkester: "orchestra", symfoniorkester: "orchestra", kammarorkester: "chamber orchestra",
-  stråkorkester: "strings", blåsorkester: "wind band", brassband: "brass band",
-};
-
 /**
  * A LIBRIS instrumentation ("flöjt, violin, viola (2), violoncell") as a line-up key,
  * or null if any part isn't an instrument we know: better no line-up than a wrong one.
@@ -132,14 +114,37 @@ export function librisLineup(medium: string[]): string | null {
   if (medium.length !== 1) return null; // several media: alternatives or a collection
   const parts: Ensemble = {};
   // A trailing year dates the whole entry ("röst, piano (1882)"); counts are small.
-  const label = medium[0]!.toLowerCase().replace(/\s*\(\d{4}\)\.?\s*$/, "").replace(/\.$/, "");
+  const label = medium[0]!
+    .toLowerCase()
+    .replace(/[\s.;,]*$/, "")
+    .replace(/\s*\(\d{4}\)$/, "")
+    .replace(/[\s.;,]*$/, "")
+    .replace(/\bpiano,? 4 h\b\.?/, "piano 4 händer");
   for (const raw of label.split(/,\s*/)) {
     const m = /^(.+?)(?:\s*\((\d{1,2})\))?$/.exec(raw.trim());
-    const id = m && SWEDISH[m[1]!.trim()];
-    if (!id) return null;
-    parts[id] = (parts[id] ?? 0) + Number(m![2] ?? 1);
+    const found = m && SWEDISH[m[1]!.trim()];
+    if (!found) return null;
+    for (const [id, n] of Object.entries(typeof found === "string" ? { [found]: 1 } : found)) parts[id] = (parts[id] ?? 0) + n * Number(m![2] ?? 1);
   }
   return ensembleKey(parts) || null;
+}
+
+/**
+ * A record's line-up, from its instrumentation field or the one its title spells out
+ * ("variationer för blåskvintett"); most records only have the title. When both are
+ * read: the same instruments → the field's (or the title's, if it counts more players);
+ * the title adds some (a continuo) → the title's; otherwise the edition is likely an
+ * arrangement of the work, and neither is the work's.
+ */
+export function librisRecordLineup(r: Pick<LibrisRecord, "medium" | "title">): string | null {
+  const field = librisLineup(r.medium);
+  const title = lineupFromTitle(r.title);
+  if (!title) return field;
+  if (!field) return ensembleKey(title) || null;
+  const f = parseEnsembleKey(field);
+  const [named, titled] = [instrumentsNamed(f), instrumentsNamed(title)];
+  if ([...named].every((i) => titled.has(i))) return named.size === titled.size && playerCount(title) <= playerCount(f) ? field : ensembleKey(title);
+  return null;
 }
 
 export async function crawlLibris(): Promise<void> {

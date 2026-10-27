@@ -19,6 +19,7 @@ import {
   type Signal,
   type SortOrder,
   type SourceId,
+  type ArrangedBy,
   type WorkDetail,
   type WorkSort,
   type WorkSummary,
@@ -94,6 +95,8 @@ export interface WorkQuery {
   minPlayers?: number;
   arrangements?: boolean;
   composer?: string;
+  /** With a composer: also the works they arranged (IMSLP names arrangers; matched by name) */
+  arrangedBy?: boolean;
   eras?: (Era | "Unknown")[];
   show?: "all" | "core" | "free";
   q?: string;
@@ -128,7 +131,48 @@ const SUMMARY = `w.id, w.title, w.year, w.era, w.score, s.lineup, s.players, s.a
 const CORE = "FROM scorings s JOIN works w ON w.id = s.work_id LEFT JOIN composers c ON c.id = w.composer_id";
 const FROM = `${CORE} LEFT JOIN orchestrations o ON o.work_id = w.id`;
 
-function toSummary(r: Row): WorkSummary {
+// Who arranged a row's work. On a line-up's list: the row's arrangements for that line-up,
+// when it's listed for an arrangement. Searching: all with a named arranger, of which
+// toSummary keeps those by an arranger searched for.
+const ARRANGED_FOR_ROW = `(SELECT json_group_array(json_array(a.arranger, a.excerpt, a.lineup)) FROM arrangements a
+  WHERE a.work_id = w.id AND a.lineup = s.lineup AND s.arrangement = 1) AS arranged`;
+const ARRANGED_ANY = `(SELECT json_group_array(json_array(a.arranger, a.excerpt, a.lineup)) FROM arrangements a
+  WHERE a.work_id = w.id AND a.arranger IS NOT NULL) AS arranged`;
+
+/** Search weights per works_fts column: title, composer, aliases, keys, arrangers */
+const BM25 = "10.0, 6.0, 4.0, 8.0, 3.0";
+/** The columns with a work's own words, not its arrangers' */
+const OWN_COLUMNS = "title composer aliases keys";
+
+/** Works a composer arranged: IMSLP's arrangers by the composer's name */
+const ARRANGED_BY_COMPOSER = "w.id IN (SELECT a.work_id FROM arrangements a WHERE a.arranger = (SELECT name FROM composers WHERE id = ?) COLLATE NOCASE)";
+/** A row's arrangements by a composer (ids are checked: [0-9a-z] only) */
+const arrangedByComposer = (id: string) => {
+  if (!/^[0-9a-z]+$/.test(id)) throw new Error("Not a composer id");
+  return `(SELECT json_group_array(json_array(a.arranger, a.excerpt, a.lineup)) FROM arrangements a
+    WHERE a.work_id = w.id AND a.arranger = (SELECT name FROM composers WHERE id = '${id}') COLLATE NOCASE) AS arranged`;
+};
+
+/**
+ * A row's arrangements: all of them, or (searching) those whose arranger has a word
+ * starting with one searched for. A line-up other than the row's is described.
+ */
+function arrangedBy(json: string | null | undefined, rowLineup: string, searched?: string[]): ArrangedBy[] | undefined {
+  if (!json) return undefined;
+  const rows = JSON.parse(json) as [string | null, string | null, string | null][];
+  const out: ArrangedBy[] = [];
+  const seen = new Set<string>();
+  for (const [arranger, excerpt, lineup] of rows) {
+    if (searched && !(arranger && normalize(arranger).split(" ").some((t) => searched.some((w) => t.startsWith(w))))) continue;
+    const a: ArrangedBy = { arranger, excerpt, ...(lineup && lineup !== rowLineup && { lineup: lineupDescription(lineup) }) };
+    const key = JSON.stringify(a);
+    if (!seen.has(key)) seen.add(key), out.push(a);
+  }
+  return out.length ? out.slice(0, 4) : undefined;
+}
+
+function toSummary(r: Row, searched?: string[]): WorkSummary {
+  const arranged = arrangedBy(r.arranged, r.lineup, searched);
   return {
     id: r.id,
     title: r.title,
@@ -143,6 +187,7 @@ function toSummary(r: Row): WorkSummary {
     duration: r.duration,
     movements: r.movements,
     orchestration: r.orchestration,
+    ...(arranged && { arrangedBy: arranged }),
   };
 }
 
@@ -181,6 +226,9 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
   const base: string[] = [];
   const baseArgs: unknown[] = [];
   const MATCHES = "w.n IN (SELECT rowid FROM works_fts WHERE works_fts MATCH ?)";
+  // A match on a work's own words, not its arrangers': a work found by its arranger is an
+  // arrangement, listed (and counted) as one
+  const ownFts = fts && `{${OWN_COLUMNS}} : (${fts})`;
   const multi = !!(q.lineup && q.subsets);
   if (q.lineup && q.subsets) {
     base.push("s.lineup IN (SELECT value FROM json_each(?))");
@@ -191,23 +239,31 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
   } else {
     base.push("s.lineup = w.lineup"); // one row per work: its main line-up
   }
-  if (!q.arrangements) base.push("s.arrangement = 0");
   const searching = !q.lineup && fts;
   if (searching) {
     base.push(MATCHES);
     baseArgs.push(fts);
   }
   const ownPage = q.composer && !q.lineup && !fts;
+  // A composer's works, and with arrangedBy the works they arranged
+  const byComposer = q.composer && q.arrangedBy ? `(w.composer_id = ? OR ${ARRANGED_BY_COMPOSER})` : "w.composer_id = ?";
+  const composerArgs = q.composer && q.arrangedBy ? [q.composer, q.composer] : [q.composer];
   if (ownPage) {
-    base.push("w.composer_id = ?");
-    baseArgs.push(q.composer);
+    base.push(byComposer);
+    baseArgs.push(...composerArgs);
+  }
+  // Originals only, unless arrangements are listed too: always the last of the base
+  const original = searching ? { sql: `s.arrangement = 0 AND ${MATCHES}`, args: [ownFts] } : { sql: "s.arrangement = 0", args: [] };
+  if (!q.arrangements) {
+    base.push(original.sql);
+    baseArgs.push(...original.args);
   }
 
   // Filters on top. Each facet counts with all the others applied, but not its own, so
   // its numbers say what picking it would give.
   type Filter = { key: "composer" | "era" | "length" | "orchestra" | "show" | "q"; sql: string; args: unknown[] };
   const filters: Filter[] = [];
-  if (q.composer && !ownPage) filters.push({ key: "composer", sql: "w.composer_id = ?", args: [q.composer] });
+  if (q.composer && !ownPage) filters.push({ key: "composer", sql: byComposer, args: composerArgs });
   if (q.eras?.length) {
     const known = q.eras.filter((e) => (ERAS as readonly string[]).includes(e));
     const parts: string[] = [];
@@ -245,7 +301,8 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
   }
   if (q.show === "core") filters.push({ key: "show", sql: `w.score >= ${CORE_SCORE}`, args: [] });
   if (q.show === "free") filters.push({ key: "show", sql: "w.free = 1", args: [] });
-  if (fts && !searching) filters.push({ key: "q", sql: MATCHES, args: [fts] });
+  // Within a line-up, an arranger's name matches the rows that are arrangements
+  if (fts && !searching) filters.push({ key: "q", sql: `(${MATCHES} OR (s.arrangement = 1 AND ${MATCHES}))`, args: [ownFts, fts] });
 
   const cond = (c: string[]) => `WHERE ${c.join(" AND ")}`;
   const orch = filters.some((f) => f.key === "orchestra");
@@ -255,11 +312,12 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
   // The page. Ranked, a line-up's works come straight from the scorings_rank index
   // (s.score is the work's score), in order, without sorting them all.
   const relevance = sort === "relevance";
-  const rowsFrom = relevance ? `${FROM} JOIN (SELECT rowid, rank FROM works_fts WHERE works_fts MATCH ? AND rank MATCH 'bm25(10.0, 6.0, 4.0, 8.0)') f ON f.rowid = w.n` : FROM;
+  const rowsFrom = relevance ? `${FROM} JOIN (SELECT rowid, rank FROM works_fts WHERE works_fts MATCH ? AND rank MATCH 'bm25(${BM25})') f ON f.rowid = w.n` : FROM;
+  const summary = `${SUMMARY}, ${q.composer && q.arrangedBy ? arrangedByComposer(q.composer) : searching ? ARRANGED_ANY : ARRANGED_FOR_ROW}`;
   // With smaller groups a work can be listed for several of them: keep the largest.
   const select = multi
-    ? `SELECT ${SUMMARY.replace("s.players", "MAX(s.players) AS players")} ${rowsFrom} ${cond(where)} GROUP BY s.work_id`
-    : `SELECT ${SUMMARY} ${rowsFrom} ${cond(where)}`;
+    ? `SELECT ${summary.replace("s.players", "MAX(s.players) AS players")} ${rowsFrom} ${cond(where)} GROUP BY s.work_id`
+    : `SELECT ${summary} ${rowsFrom} ${cond(where)}`;
   const stmts = [db.prepare(`${select} ORDER BY ${orderBy(dir)} LIMIT ? OFFSET ?`).bind(...(relevance ? [fts] : []), ...args, limit, offset)];
 
   // The total and facets. A big line-up, unfiltered, has them precomputed; otherwise one
@@ -270,9 +328,13 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
   if (precomputed) {
     stmts.push(db.prepare("SELECT total, facets FROM lineup_facets WHERE lineup = ? AND arrangements = ?").bind(q.lineup, q.arrangements ? 1 : 0));
   } else if (q.facets) {
-    const flags = filters.map((f) => `MAX(${f.sql}) AS f_${f.key}`);
+    // Arrangements are counted whether or not they're listed, so the facet's base has them
+    // all, and "originals only" is one more condition to pass
+    const [facetBase, facetBaseArgs] = q.arrangements ? [base, baseArgs] : [base.slice(0, -1), baseArgs.slice(0, baseArgs.length - original.args.length)];
+    const flags = [...filters.map((f) => `MAX(${f.sql}) AS f_${f.key}`), `MAX(${original.sql}) AS original`];
     if (q.orchestra) flags.push(`MAX(${ORCHESTRAL} AND o.work_id IS NULL) AS unscored`);
-    const pass = (except?: Filter["key"]) => filters.filter((f) => f.key !== except).map((f) => `f_${f.key}`).join(" AND ") || "1";
+    const pass = (except?: Filter["key"] | "arrangements") =>
+      [...filters.filter((f) => f.key !== except).map((f) => `f_${f.key}`), ...(!q.arrangements && except !== "arrangements" ? ["original"] : [])].join(" AND ") || "1";
     const none = (n: number) => Array(n).fill("NULL").join(", ");
     const lengthSums = LENGTHS.map((l, i) => `SUM(${pass("length")} AND duration >= ${l.min * 60}${l.max ? ` AND duration < ${l.max * 60}` : ""}) AS length_${i}`);
     stmts.push(
@@ -281,22 +343,23 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
           `WITH m AS MATERIALIZED (
              SELECT w.id AS id, w.era AS era, c.id AS cid, c.name AS cname, c.sort_name AS csort, w.score AS score, w.free AS free, w.duration AS duration
              ${flags.map((f) => `, ${f}`).join("")}
-             ${orch || q.orchestra ? FROM : CORE} ${cond(base)} GROUP BY w.id
+             ${orch || q.orchestra ? FROM : CORE} ${cond(facetBase)} GROUP BY w.id
            )
            SELECT 'total' AS kind, NULL AS key, NULL AS name, SUM(${pass()}) AS n,
              SUM(${pass("show")} AND score >= ${CORE_SCORE}) AS core, SUM(${pass("show")} AND free) AS free,
              SUM(${pass("length")} AND duration IS NULL) AS unknown_length, ${lengthSums.join(", ")},
-             ${q.orchestra ? `SUM(${pass("orchestra")} AND unscored)` : "NULL"} AS unscored
+             ${q.orchestra ? `SUM(${pass("orchestra")} AND unscored)` : "NULL"} AS unscored,
+             SUM(${pass("arrangements")} AND NOT original) AS arrangements
            FROM m
            UNION ALL
-           SELECT 'era', era, NULL, SUM(${pass("era")}), ${none(LENGTHS.length + 4)} FROM m GROUP BY era
+           SELECT 'era', era, NULL, SUM(${pass("era")}), ${none(LENGTHS.length + 5)} FROM m GROUP BY era
            UNION ALL
            SELECT * FROM (
-             SELECT 'composer', cid, cname, SUM(${pass("composer")}) AS n, ${none(LENGTHS.length + 4)}
+             SELECT 'composer', cid, cname, SUM(${pass("composer")}) AS n, ${none(LENGTHS.length + 5)}
              FROM m WHERE cid IS NOT NULL GROUP BY cid HAVING n > 0 ORDER BY n DESC, MIN(csort) LIMIT 300
            )`,
         )
-        .bind(...filters.flatMap((f) => f.args), ...baseArgs),
+        .bind(...filters.flatMap((f) => f.args), ...original.args, ...facetBaseArgs),
     );
   } else if (!multi && !filters.length && q.lineup) {
     stmts.push(db.prepare(`SELECT COUNT(*) AS n FROM scorings s ${cond(base)}`).bind(...baseArgs));
@@ -336,7 +399,9 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
   const results = await db.batch<Row>(stmts);
   const unscored = unscoredAlone ? results.pop()!.results[0]?.n : undefined;
   const [rows, counted, lineups] = results;
-  const works = rows!.results.map(toSummary);
+  // Searching, a row says which of its arrangements the search found it by
+  const searched = searching ? normalize(q.q!).split(" ").filter((w) => w.length >= 2) : undefined;
+  const works = rows!.results.map((r) => toSummary(r, searched));
   if (precomputed) {
     const r = counted!.results[0];
     // Not there (an older dataset): count after all
@@ -353,6 +418,7 @@ export async function listWorks(db: Db, index: LineupsIndex | null, q: WorkQuery
     core: totals.core ?? 0,
     free: totals.free ?? 0,
     lengths: { known: LENGTHS.map((_, i) => totals[`length_${i}`] ?? 0), unknown: totals.unknown_length ?? 0 },
+    arrangements: totals.arrangements ?? 0,
   };
   return { total: totals.n ?? 0, offset, works, facets, ...(q.orchestra && { unscored: totals.unscored ?? 0 }) };
 }
@@ -369,7 +435,7 @@ async function redirectFor(db: Db, entity: "work" | "composer", id: string): Pro
 const toLink = (r: Row): Link => ({ provider: r.provider, kind: r.kind, ref: r.ref, url: r.url, label: r.label, source: r.source });
 
 export async function getWork(db: Db, id: string): Promise<Found<WorkDetail>> {
-  const [work, scorings, links, orchestration] = await db.batch<Row>([
+  const [work, scorings, links, orchestration, arrangements] = await db.batch<Row>([
     db
       .prepare(
         `SELECT w.*, c.id AS cid, c.name AS cname, c.born AS cborn, c.died AS cdied, c.era AS cera, c.sitelinks AS csitelinks
@@ -381,6 +447,7 @@ export async function getWork(db: Db, id: string): Promise<Found<WorkDetail>> {
       .bind(id),
     db.prepare("SELECT * FROM links WHERE entity = 'work' AND entity_id = ? ORDER BY kind DESC, provider, position").bind(id),
     db.prepare("SELECT scoring, instruments, source, ref FROM orchestrations WHERE work_id = ?").bind(id),
+    db.prepare("SELECT lineup, arranger, excerpt, heading, license FROM arrangements WHERE work_id = ? ORDER BY position").bind(id),
   ]);
   const w = work!.results[0];
   const o = orchestration!.results[0];
@@ -414,13 +481,14 @@ export async function getWork(db: Db, id: string): Promise<Found<WorkDetail>> {
       scorings: scorings!.results.map(
         (s): Scoring => ({ lineup: s.lineup, description: s.description, players: s.players, arrangement: !!s.arrangement, sources: JSON.parse(s.sources) }),
       ),
+      arrangements: arrangements!.results.map((a) => ({ lineup: a.lineup, arranger: a.arranger, excerpt: a.excerpt, heading: a.heading, license: a.license })),
       links: links!.results.map(toLink),
     },
   };
 }
 
 export async function getComposer(db: Db, id: string): Promise<Found<ComposerDetail>> {
-  const [composer, links, lineups] = await db.batch<Row>([
+  const [composer, links, lineups, arranged] = await db.batch<Row>([
     db.prepare("SELECT * FROM composers WHERE id = ?").bind(id),
     db.prepare("SELECT * FROM links WHERE entity = 'composer' AND entity_id = ? ORDER BY kind DESC, provider, position").bind(id),
     db
@@ -429,6 +497,13 @@ export async function getComposer(db: Db, id: string): Promise<Found<ComposerDet
          WHERE w.composer_id = ? AND s.arrangement = 0 GROUP BY s.lineup ORDER BY n DESC, l.players LIMIT 100`,
       )
       .bind(id),
+    // Other composers' works they arranged
+    db
+      .prepare(
+        `SELECT COUNT(DISTINCT a.work_id) AS n FROM arrangements a JOIN works w ON w.id = a.work_id
+         WHERE a.arranger = (SELECT name FROM composers WHERE id = ?) COLLATE NOCASE AND w.composer_id IS NOT ?`,
+      )
+      .bind(id, id),
   ]);
   const c = composer!.results[0];
   if (!c) return redirectFor(db, "composer", id);
@@ -443,6 +518,7 @@ export async function getComposer(db: Db, id: string): Promise<Found<ComposerDet
       works: c.works,
       links: links!.results.map(toLink),
       lineups: lineups!.results.map((r) => ({ key: r.key, description: r.description, count: r.n })),
+      arranged: arranged!.results[0]?.n ?? 0,
     },
   };
 }
@@ -467,14 +543,14 @@ export async function search(db: Db, input: string, limit = 20, offset = 0): Pro
       .prepare(
         `SELECT ${SUMMARY} FROM works_fts f JOIN works w ON w.n = f.rowid
          JOIN scorings s ON s.work_id = w.id AND s.lineup = w.lineup LEFT JOIN composers c ON c.id = w.composer_id LEFT JOIN orchestrations o ON o.work_id = w.id
-         WHERE works_fts MATCH ? ORDER BY bm25(works_fts, 10.0, 6.0, 4.0, 8.0) - w.score * 0.5, w.n LIMIT ? OFFSET ?`,
+         WHERE works_fts MATCH ? ORDER BY bm25(works_fts, ${BM25}) - w.score * 0.5, w.n LIMIT ? OFFSET ?`,
       )
       .bind(fts, limit, offset),
     db.prepare("SELECT COUNT(*) AS n FROM works_fts WHERE works_fts MATCH ?").bind(fts),
   ]);
   return {
     composers: composers!.results.map((r) => ({ id: r.id, name: r.name, born: r.born, died: r.died, works: r.works })),
-    works: works!.results.map(toSummary),
+    works: works!.results.map((r) => toSummary(r)),
     total: count!.results[0]?.n ?? 0,
   };
 }

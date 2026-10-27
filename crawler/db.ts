@@ -2,7 +2,7 @@
 // published as the SQLite download and loaded into Cloudflare D1, which the Worker
 // queries. Comments here are the documentation of the downloads too.
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export const TABLES = `
 -- Dataset version, build time, counts, schema version and stats (JSON)
@@ -94,6 +94,18 @@ CREATE TABLE scorings (
   PRIMARY KEY (lineup, work_id)
 ) WITHOUT ROWID;
 
+-- Arrangements on IMSLP: who arranged a work, or part of it, for which line-up
+CREATE TABLE arrangements (
+  work_id TEXT NOT NULL REFERENCES works (id),
+  lineup TEXT REFERENCES lineups (key), -- when the heading reads as one of the work's line-ups
+  arranger TEXT,                      -- "Jesper Jerkert", "the composer"; null when unknown
+  excerpt TEXT,                       -- what's arranged when not the whole work ("Overture")
+  heading TEXT NOT NULL,              -- IMSLP's: "For Flute, Oboe, Clarinet, Bassoon and Horn (Jerkert)"
+  license TEXT,                       -- of its files: "Public Domain", "Creative Commons Attribution 4.0"
+  position INTEGER NOT NULL,          -- order on the IMSLP page
+  PRIMARY KEY (work_id, position)
+) WITHOUT ROWID;
+
 -- Where to find works and composers: sheet music, articles, database records
 CREATE TABLE links (
   entity TEXT NOT NULL,               -- 'work' or 'composer'
@@ -127,7 +139,7 @@ CREATE TABLE redirects (
 ) WITHOUT ROWID;
 
 -- Full-text search; rowid is works.n / composers.n
-CREATE VIRTUAL TABLE works_fts USING fts5 (title, composer, aliases, keys, tokenize = 'unicode61 remove_diacritics 2');
+CREATE VIRTUAL TABLE works_fts USING fts5 (title, composer, aliases, keys, arrangers, tokenize = 'unicode61 remove_diacritics 2');
 CREATE VIRTUAL TABLE composers_fts USING fts5 (name, tokenize = 'unicode61 remove_diacritics 2');
 `;
 
@@ -135,9 +147,11 @@ export const INDEXES = `
 CREATE INDEX works_composer ON works (composer_id, score DESC);
 CREATE INDEX scorings_rank ON scorings (lineup, arrangement, score DESC);
 CREATE INDEX scorings_work ON scorings (work_id);
+CREATE INDEX arrangements_lineup ON arrangements (work_id, lineup);
+CREATE INDEX arrangements_arranger ON arrangements (arranger COLLATE NOCASE);
 -- A provider's record belongs to one work or composer (it anchors its id).
 CREATE UNIQUE INDEX links_ref ON links (entity, provider, ref);
 `;
 
 /** Tables in the downloads and in D1, in dependency order (FTS tables are rebuilt from these). */
-export const DATA_TABLES = ["meta", "sources", "composers", "works", "lineups", "scorings", "orchestrations", "lineup_facets", "links", "redirects"] as const;
+export const DATA_TABLES = ["meta", "sources", "composers", "works", "lineups", "scorings", "orchestrations", "arrangements", "lineup_facets", "links", "redirects"] as const;

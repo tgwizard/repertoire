@@ -11,6 +11,14 @@ test("title player counts must agree with the line-up", () => {
   assert.equal(titleFitsPlayers("Wind Quintet No. 4", QUINTET), true);
   assert.equal(titleFitsPlayers("Summer Music", QUINTET), true);
   assert.equal(titleFitsPlayers("Symphony No. 3 for 2 quartets", decodeEnsemble("orchestra")), true);
+  // Other languages; singers' accompaniment doesn't count
+  assert.equal(titleFitsPlayers("Kvartett nr 2", QUARTET), true);
+  assert.equal(titleFitsPlayers("Sechs Quartette", QUINTET), false);
+  assert.equal(titleFitsPlayers("Duette für zwei Singstimmen mit Pianoforte-Begleitung", decodeEnsemble("voice:2,piano")), true);
+  assert.equal(titleFitsPlayers("Quintet for clarinet and string quartet", decodeEnsemble("clarinet,violin:2,viola,cello")), true); // the first counts
+  assert.equal(titleFitsPlayers("Zwei Trios für Orgel", decodeEnsemble("organ")), true); // trio sonatas
+  assert.equal(titleFitsPlayers("Quartett für vier Schlagzeuger", decodeEnsemble("percussion")), true);
+  assert.equal(titleFitsPlayers("Trio", decodeEnsemble("violin,cello")), false);
 });
 
 test("Wikidata instrumentation must not include extra instruments", () => {

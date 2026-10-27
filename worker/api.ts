@@ -78,9 +78,9 @@ const ENDPOINTS = {
   "/api/meta": "Dataset version, counts and sources",
   "/api/lineups": "All line-ups: key → [original works, arrangement-only works]",
   "/api/lineups/{key}": "One line-up, e.g. /api/lineups/cello,viola,violin*2",
-  "/api/works?lineup={key}": "Works for a line-up. Also: subsets=1 (smaller groups too), min_players, arrangements=1, composer, era (repeatable), show=core|free, q, orchestra (a scoring, e.g. 2.2.2.2,4.2.3.1,timp,str) with fit=within|exact, min_duration (minutes, from) and max_duration (minutes, under), or duration=unknown, sort=rank|players|chronological|composer|title|duration, order=asc|desc, offset, limit (≤200), facets=1",
+  "/api/works?lineup={key}": "Works for a line-up. Also: subsets=1 (smaller groups too), min_players, arrangements=1, composer (with arranged_by=1, also works they arranged), era (repeatable), show=core|free, q, orchestra (a scoring, e.g. 2.2.2.2,4.2.3.1,timp,str) with fit=within|exact, min_duration (minutes, from) and max_duration (minutes, under), or duration=unknown, sort=rank|players|chronological|composer|title|duration, order=asc|desc, offset, limit (≤200), facets=1",
   "/api/works/{id}": "One work, with its line-ups, links and ranking",
-  "/api/composers/{id}": "One composer; their works: /api/works?composer={id}",
+  "/api/composers/{id}": "One composer, and how many works they arranged; their works: /api/works?composer={id}",
   "/api/search?q={text}": "Works and composers matching a search; limit, offset",
 };
 
@@ -116,6 +116,7 @@ export async function handleApi(request: Request, db: Db): Promise<Response> {
           minPlayers: int(p.get("min_players"), 1),
           arrangements: p.get("arrangements") === "1",
           composer,
+          arrangedBy: !!composer && p.get("arranged_by") === "1",
           eras: p.getAll("era").filter((e): e is Era | "Unknown" => e === "Unknown" || (ERAS as readonly string[]).includes(e)),
           show: (["core", "free"] as const).find((s) => s === p.get("show")) ?? "all",
           q,

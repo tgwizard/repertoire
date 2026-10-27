@@ -15,10 +15,12 @@ interface Props {
   sorts: WorkSort[];
   /** More selects, before Composer */
   before?: ReactNode;
+  /** Whether works only arranged for the line-up are listed too */
+  arrangements: { included: boolean; onChange: (included: boolean) => void };
 }
 
 /** Show and Era chips; Composer, Length and Sort: the filters every list of works has. */
-export function FilterControls({ filters, set, facets: f, sorts, before }: Props) {
+export function FilterControls({ filters, set, facets: f, sorts, before, arrangements }: Props) {
   const { eras, composer, show, length } = filters;
   const toggleEra = (e: string) => set({ eras: eras.includes(e) ? eras.filter((x) => x !== e) : [...eras, e].sort() });
   // Every era the list has stays (so the chips don't move); those the other filters leave
@@ -50,6 +52,15 @@ export function FilterControls({ filters, set, facets: f, sorts, before }: Props
                 {label} {n !== null && n !== undefined && <span className="era-count">{fmt.format(n)}</span>}
               </button>
             ))}
+            {/* Not one of the above: on or off with any of them */}
+            <button
+              className={`era-chip toggle-chip${arrangements.included ? " active" : ""}${f?.arrangements === 0 ? " empty" : ""}`}
+              aria-pressed={arrangements.included}
+              title="Works arranged for the line-up, not written for it"
+              onClick={() => arrangements.onChange(!arrangements.included)}
+            >
+              Arrangements {f?.arrangements !== undefined && <span className="era-count">{fmt.format(f.arrangements)}</span>}
+            </button>
           </div>
         </div>
         {eraOptions.length > 0 && (

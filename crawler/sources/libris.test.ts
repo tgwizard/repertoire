@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { extractRecord, librisLineup } from "./libris.ts";
+import { extractRecord, librisLineup, librisRecordLineup } from "./libris.ts";
 
 test("LIBRIS instrumentation in Swedish becomes a line-up, or nothing", () => {
   assert.equal(librisLineup(["flöjt, violin, viola (2), violoncell"]), "cello,flute,viola*2,violin");
@@ -13,6 +13,21 @@ test("LIBRIS instrumentation in Swedish becomes a line-up, or nothing", () => {
   assert.equal(librisLineup(["violin, okänt instrument"]), null);
   assert.equal(librisLineup(["piano", "orgel"]), null); // alternatives
   assert.equal(librisLineup([]), null);
+  // Ensembles by name; catalogue punctuation
+  assert.equal(librisLineup(["blåskvintett"]), "bassoon,clarinet,flute,horn,oboe");
+  assert.equal(librisLineup(["stråkkvartett, piano"]), "cello,piano,viola,violin*2");
+  assert.equal(librisLineup(["fagott, orkester;"]), "bassoon,orchestra");
+  assert.equal(librisLineup(["piano, 4 h"]), "piano 4 hands");
+});
+
+test("a LIBRIS record's line-up: its field, else its title; disagreeing, neither", () => {
+  const r = (title: string, medium: string[]) => librisRecordLineup({ title, medium });
+  assert.equal(r("Per spelman, variationer för blåskvintett", []), "bassoon,clarinet,flute,horn,oboe");
+  assert.equal(r("Drei Hymnen, für Bariton und Klavier", ["röst, piano"]), "piano,voice"); // the same instruments: the field's
+  assert.equal(r("Duet no. II for 2 horns", ["horn"]), "horn*2"); // the title counts more players
+  assert.equal(r("Konzert für Querflöte, Streicher und Basso continuo", ["flöjt, stråkorkester"]), "continuo,flute,strings"); // the title names more
+  assert.equal(r("Partita d-Moll für Klarinette solo", ["flöjt"]), null); // an edition for another instrument
+  assert.equal(r("Kvartett", ["violin (2), viola, violoncell"]), "cello,viola,violin*2");
 });
 
 test("a LIBRIS search result reduces to the fields we use", () => {

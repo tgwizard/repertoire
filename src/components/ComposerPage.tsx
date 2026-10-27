@@ -19,6 +19,8 @@ export function ComposerPage({ id }: { id: string }) {
     return { sort: sort ?? "rank", order };
   });
   const [allLineups, setAllLineups] = useState(false);
+  // Also the works they arranged (other composers')
+  const [arranged, setArranged] = useState(() => new URLSearchParams(location.search).get("arr") === "1");
 
   useEffect(() => {
     if (c) document.title = `${c.name} · Repertoire Finder`;
@@ -27,19 +29,22 @@ export function ComposerPage({ id }: { id: string }) {
     const url = new URL(location.href);
     if (lineup) url.searchParams.set("lineup", lineup);
     else url.searchParams.delete("lineup");
+    if (arranged) url.searchParams.set("arr", "1");
+    else url.searchParams.delete("arr");
     url.searchParams.delete("sort");
     url.searchParams.delete("order");
     setSortParams(url.searchParams, sorting);
     history.replaceState(null, "", url.pathname + url.search.replaceAll("%2C", ","));
-  }, [lineup, sorting]);
+  }, [lineup, sorting, arranged]);
 
   const query = useMemo(() => {
     // Arrangements too: some works survive on IMSLP only in arrangements.
     const p = new URLSearchParams({ composer: id, arrangements: "1" });
     if (lineup) p.set("lineup", lineup);
+    if (arranged) p.set("arranged_by", "1");
     setSortParams(p, sorting);
     return p.toString().replaceAll("%2C", ",");
-  }, [id, lineup, sorting]);
+  }, [id, lineup, sorting, arranged]);
   const { works, total, loading, more, error: worksError, hasMore, loadMore, retry } = useWorks(c ? query : null);
   const busy = loading && !more;
 
@@ -61,7 +66,7 @@ export function ComposerPage({ id }: { id: string }) {
         <p className="detail-meta">
           {lifespan(c) && <span>{lifespan(c)}</span>}
           {c.era && <span className="badge">{c.era}</span>}
-          <span className="muted"> · {fmt.format(c.works)} works</span>
+          <span className="muted"> · {fmt.format(c.works)} {c.works === 1 ? "work" : "works"}</span>
         </p>
         {c.links.length > 0 && (
           <ul className="link-list inline">
@@ -92,6 +97,16 @@ export function ComposerPage({ id }: { id: string }) {
           {c.lineups.length > LINEUPS_SHOWN && (
             <button className="link-button small" onClick={() => setAllLineups(!allLineups)}>
               {allLineups ? "Fewer" : `${c.lineups.length - LINEUPS_SHOWN} more`}
+            </button>
+          )}
+          {c.arranged > 0 && (
+            <button
+              className={`era-chip toggle-chip${arranged ? " active" : ""}`}
+              aria-pressed={arranged}
+              title={`Other composers' works ${c.name} arranged, according to IMSLP`}
+              onClick={() => setArranged(!arranged)}
+            >
+              Their arrangements <span className="era-count">{fmt.format(c.arranged)}</span>
             </button>
           )}
         </div>
