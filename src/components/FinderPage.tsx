@@ -53,6 +53,21 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
     setFilters((f) => ({ ...f, sort: undefined, order: undefined, within: "" }));
   };
   const q = useDebounced(query.trim(), 250);
+  // Clear: the search, filters, sort, arrangements, smaller groups and orchestra; the
+  // ensemble stays (it has its own Clear)
+  const narrowed = (() => {
+    const p = new URLSearchParams();
+    writeFilters(p, filters, smaller);
+    return p.size > 0 || !!query.trim() || includeArr || smaller || !!orchestra.trim() || exact;
+  })();
+  const clearAll = () => {
+    setQuery("");
+    setFilters(defaultFilters());
+    setIncludeArr(false);
+    setSmaller(false);
+    setOrchestra("");
+    setExact(false);
+  };
 
   // Arriving at "/": the URL says what to show. A link from a work page names a
   // line-up; the logo names none, which starts over; going back restores the URL we left.
@@ -176,7 +191,13 @@ export function FinderPage({ index, meta, active, navigation }: Props) {
       </aside>
       <div className="main-search">
         <div className="filter-box">
-          <SearchField id="search" value={query} onChange={setQuery} narrowed={picked} />
+          <div className="search-row">
+            <SearchField id="search" value={query} onChange={setQuery} narrowed={picked} />
+            {/* Hidden rather than gone when there's nothing to clear, so the field keeps its width */}
+            <button className="link-button small" onClick={clearAll} hidden={!narrowed}>
+              Clear
+            </button>
+          </div>
           <div className="filter-slot" ref={setSlot} />
         </div>
       </div>

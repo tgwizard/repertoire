@@ -1685,6 +1685,23 @@ select:not([multiple]):hover {
   max-width: none;
 }
 
+/* The search, and Clear at the box's top right, as on the ensemble card */
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.search-row .search-box {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-row .link-button[hidden] {
+  display: inline;
+  visibility: hidden;
+}
+
 /* Text fields the size of the chips and selects */
 .filter-box .search-box input,
 .filter-box .orchestra-field input {

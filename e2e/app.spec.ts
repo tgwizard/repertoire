@@ -242,6 +242,22 @@ test("picking a composer keeps the others on offer", async ({ page }) => {
   expect(await select.locator("option").count()).toBeGreaterThan(100);
 });
 
+test("Clear in the search box starts the list over, keeping the line-up", async ({ page }) => {
+  await page.goto("/?i=flute,oboe,clarinet,bassoon,horn,piano");
+  const clear = page.locator(".search-row").getByRole("button", { name: "Clear" });
+  await expect(clear).toBeHidden();
+  await page.getByLabel(/Include smaller groups/).check();
+  await page.getByRole("button", { name: /^Romantic \d/ }).click();
+  await page.getByRole("searchbox").fill("quintet");
+  await expect(page).toHaveURL(/sub=1.*era=Romantic.*q=quintet/);
+  await clear.click();
+  await expect(page).toHaveURL(/\?i=[^&]+$/);
+  await expect(page.getByRole("searchbox")).toHaveValue("");
+  await expect(page.getByLabel(/Include smaller groups/)).not.toBeChecked();
+  await expect(clear).toBeHidden();
+  await expect(page.locator(".ensemble-card .chip")).toHaveCount(6);
+});
+
 test("smaller groups: the full group's works, then those for fewer players", async ({ page }) => {
   await page.goto("/?i=flute,oboe,clarinet,bassoon,horn,piano");
   await page.getByLabel(/Include smaller groups/).check();
