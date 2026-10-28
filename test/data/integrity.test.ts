@@ -226,6 +226,8 @@ test("links: one record per provider id, well-formed, of the provider's kind", (
     gnd: /^https:\/\/d-nb\.info\/gnd\/[0-9X-]+$/,
     rism: /^https:\/\/rism\.online\/(sources|people)\/\d+$/,
     libris: /^https:\/\/libris\.kb\.se\/[0-9a-z]+$/,
+    "swedish-libraries": /^https:\/\/libris\.kb\.se\/[0-9a-z]+$/,
+    dnb: /^https:\/\/d-nb\.info\/[0-9X]+$/,
     mutopia: /^https:\/\/www\.mutopiaproject\.org\/cgibin\/piece-info\.cgi\?id=\d+$/,
   };
   for (const l of all("SELECT provider, kind, url, COUNT(*) AS n FROM links GROUP BY provider, kind, url IS NULL")) {

@@ -10,7 +10,13 @@ const T = Date.parse("2026-10-01T00:00:00Z");
 
 const libris = (id: string, title: string, uniform: string | null, family: string, given: string, born: number, died: number | null, medium: string[], extent: string) => ({
   id, title, uniform, composers: [{ family, given, born, died, agent: `agent-${family.toLowerCase()}` }], arranged: false, medium,
-  kssb: [], extent, year: 2001, publisher: "Svensk Musik", shelf: null, collection: false,
+  kssb: [] as string[], extent, year: 2001, publisher: "Svensk Musik", shelf: null, held: ["X"], collection: false,
+});
+
+const dnb = (id: string, title: string, remainder: string | null, composer: { gnd: string | null; name: string; born: number | null }, work: { gnd: string; title: string; media?: [string, number][] } | null, year: number) => ({
+  id, title, remainder, composer: { ...composer, died: null }, composers: 1,
+  work: work && { gnd: work.gnd, title: work.title, media: (work.media ?? []).map(([name, count]) => ({ name, count })), arranged: false, selection: false },
+  arranged: false, collection: false, year, publisher: "Breitkopf & Härtel", extent: "1 Partitur, 1 Stimme",
 });
 
 const imslpWork = (pageid: number, title: string, era: string | null, recorded = false) => ({ pageid, title, era: era as never, recorded, audio: false });
@@ -144,6 +150,23 @@ export function fixtureInput(later = false): BuildInput {
     },
     musicbrainz: { fetchedAt: T, recordings: { "mb-debussy": { count: 500, at: T } } },
     gnd: null,
+    dnb: {
+      fetchedAt: T,
+      firstYear: 2000,
+      total: 5,
+      records: [
+        // An edition of a work IMSLP has, by a composer DNB names: a link, newest first.
+        dnb("d115a", "Quintett für Klarinette, 2 Violinen, Viola und Violoncello h-Moll op. 115", null, { gnd: "118514229", name: "Johannes Brahms", born: 1833 }, { gnd: "300011511", title: "Quintette, op. 115", media: [["Klarinette", 1], ["Violine", 2], ["Viola", 1], ["Violoncello", 1]] }, 2010),
+        dnb("d115b", "Klarinettenquintett h-Moll op. 115", null, { gnd: "118514229", name: "Johannes Brahms", born: 1833 }, { gnd: "300011511", title: "Quintette, op. 115" }, 2024),
+        // A new work, in two line-ups of one GND work: one work, both line-ups.
+        dnb("d150v", "150 Decibel", "for viola and piano", { gnd: "1080149961", name: "Nicola Campogrande", born: 1969 }, { gnd: "1397222646", title: "150 decibel" }, 2025),
+        dnb("d150c", "150 Decibel", "for violoncello and piano", { gnd: "1080149961", name: "Nicola Campogrande", born: 1969 }, { gnd: "1397222646", title: "150 decibel" }, 2025),
+        // An arrangement: skipped.
+        { ...dnb("darr", "Kleine Stücke", "für Gitarre", { gnd: "1", name: "A. Nobody", born: 1950 }, null, 2025), arranged: true },
+        // No GND id for the composer: no new work.
+        dnb("dnoid", "Zwei Stücke", "für Oboe und Klavier", { gnd: null, name: "B. Nobody", born: 1960 }, null, 2025),
+      ],
+    },
     rism: {
       fetchedAt: T,
       people: { "2": { gnd: null, wikidata: "Q11" } },
@@ -163,7 +186,7 @@ export function fixtureInput(later = false): BuildInput {
     },
     libris: {
       fetchedAt: T,
-      total: 6,
+      total: 8,
       records: [
         // An edition of a work IMSLP has: a link to borrow it.
         libris("lb115", "Quintett für Klarinette, zwei Violinen, Viola und Violoncello, op. 115", "Kvintett, op. 115", "Brahms", "Johannes", 1833, 1897, ["klarinett, violin (2), viola, violoncell"], "1 part. + 5 st."),
@@ -177,6 +200,10 @@ export function fixtureInput(later = false): BuildInput {
         libris("lbps", "Per spelman, variationer för blåskvintett", null, "Sund", "Robert", 1942, null, [], "1 part. (14 s.) + 5 st."),
         // A title and an instrumentation that disagree (an edition for flute): skipped.
         libris("lbpt", "Partita d-Moll für Klarinette solo", null, "Nobody", "B.", 1920, 1990, ["flöjt"], "1 st."),
+        // Held only by other libraries: a link to the libraries holding it.
+        { ...libris("lbg115", "Clarinet quintet, op. 115", "Kvintett, op. 115", "Brahms", "Johannes", 1833, 1897, [], "1 part."), held: ["G", "LMu"] },
+        // A line-up only the classification gives: comes in.
+        { ...libris("lbk2", "Kvartett nr 2", null, "Hillborg", "Anders", 1954, null, [], "4 st."), kssb: ["Xkeeb"], held: ["G"] },
       ],
     },
     mutopia: {

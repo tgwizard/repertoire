@@ -73,7 +73,32 @@ test("LIBRIS: borrow links for works we have, and works we didn't have from the 
   // A line-up only the title spells out; a title and instrumentation that disagree
   assert.deepEqual(lineups(work("Per spelman, variationer för blåskvintett").id), [{ lineup: "bassoon,clarinet,flute,horn,oboe", arrangement: 0 }]);
   assert.equal(all("SELECT * FROM works WHERE title LIKE 'Partita%'").length, 0);
-  assert.deepEqual(all("SELECT items, matched, added FROM sources WHERE id = 'libris'")[0], { items: 6, matched: 2, added: 2 });
+  assert.deepEqual(all("SELECT items, matched, added FROM sources WHERE id = 'libris'")[0], { items: 8, matched: 3, added: 3 });
+});
+
+test("LIBRIS: other libraries' copies are linked; a line-up from the classification", () => {
+  const brahms = work("Clarinet Quintet, Op.115");
+  assert.deepEqual(all("SELECT ref, label FROM links WHERE entity_id = ? AND provider = 'swedish-libraries'", brahms.id), [{ ref: "lbg115", label: "Score · Svensk Musik · 2001 · 2 libraries" }]);
+  const quartet = work("Kvartett nr 2");
+  assert.deepEqual(all("SELECT sources FROM scorings WHERE work_id = ?", quartet.id), [{ sources: '[{"source":"libris","ref":"Kvartett nr 2 (classified Xkeeb)"}]' }]);
+  assert.equal(quartet.composer_id, work("Kongsgaard variations, for string quartet").composer_id);
+});
+
+test("DNB: editions of works we have, newest first, and new works with their line-ups", () => {
+  const brahms = work("Clarinet Quintet, Op.115");
+  assert.deepEqual(all("SELECT ref, label, url FROM links WHERE entity_id = ? AND provider = 'dnb' ORDER BY position", brahms.id), [
+    { ref: "d115b", label: "Score and parts · Breitkopf & Härtel · 2024", url: "https://d-nb.info/d115b" },
+    { ref: "d115a", label: "Score and parts · Breitkopf & Härtel · 2010", url: "https://d-nb.info/d115a" },
+  ]);
+  const decibel = work("150 Decibel");
+  assert.deepEqual(lineups(decibel.id), [
+    { lineup: "cello,piano", arrangement: 0 },
+    { lineup: "piano,viola", arrangement: 0 },
+  ]);
+  assert.deepEqual(all("SELECT name, born FROM composers WHERE id = ?", decibel.composer_id), [{ name: "Nicola Campogrande", born: 1969 }]);
+  assert.deepEqual(all("SELECT anchor FROM anchors WHERE entity_id = ? ORDER BY anchor", decibel.id), [{ anchor: "gnd:1397222646" }]);
+  assert.equal(all("SELECT * FROM works WHERE title IN ('Kleine Stücke', 'Zwei Stücke')").length, 0);
+  assert.deepEqual(all("SELECT items, matched, added FROM sources WHERE id = 'dnb'")[0], { items: 6, matched: 3, added: 1 });
 });
 
 test("IMSLP arrangements: who arranged what for which of the work's line-ups; arrangers are searchable", () => {
@@ -105,7 +130,7 @@ test("RISM: copies of works we have, the composer's own hand first; libraries co
     { ref: "9002", label: "Autograph manuscript · Staatsbibliothek zu Berlin (D-B) · Mus.ms.autogr. Brahms 1" },
     { ref: "9001", label: "Manuscript copy · Österreichische Nationalbibliothek (A-Wn) · Mus.Hs.9" },
   ]);
-  assert.equal(brahms.copies, 3); // Berlin, Vienna (RISM) and Stockholm (LIBRIS)
+  assert.equal(brahms.copies, 5); // Berlin, Vienna (RISM); Stockholm, Gothenburg and Lund (LIBRIS)
   assert.equal(all("SELECT * FROM works WHERE title LIKE '%999%'").length, 0);
   assert.deepEqual(all("SELECT items, matched, added FROM sources WHERE id = 'rism'")[0], { items: 4, matched: 3, added: null });
 });

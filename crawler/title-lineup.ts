@@ -172,12 +172,12 @@ const CONCERTO = /\b(?:concert[oi]?|concertino|konsert|konzert(?:stück)?)\b/i;
 const ACCOMPANIED = ["orchestra", "chamber orchestra", "strings", "wind band", "brass band", "continuo"];
 
 // Not the work's own line-up: arrangements, reductions, excerpts
-const ARRANGED =
+export const ARRANGED =
   /\barr\b|potp?ou?rri|\bselections? from\b|\barr\.|arrang|bearb|transcri|eingerichtet|r[ée]duction|riduzione|klavierauszug|klavierutdrag|vocal score|piano score|ausgaben?\b|edition for|utgåva|opera completa|\bur\b|\bfrom\b|\baus\b|\btirée? de\b/i;
 
 /** Titles of anthologies and songbooks, not of a work */
 export const ANTHOLOGY =
-  /\b(?:ausgewählte|selected|valda|samlade|sämtliche|gesammelte|complete works|œuvres choisies|best of|bästa|hits|medley|album|songbook|collection|samling|anthology|kompositionen|compositions|\w*werke|works|spielstücke)\b/i;
+  /\b(?:ausgewählte|selected|collected|miscellaneous|valda|samlade|sämtliche|gesammelte|complete works|œuvres choisies|best of|bästa|hits|medley|album|songbook|collection|samling|anthology|kompositionen|compositions|\w*werke|works|spielstücke)\b/i;
 
 // An orchestral or stage genre "for piano" (or organ) is a reduction of it
 const ORCHESTRAL_GENRE = /\b(?:symphon\w*|sinfoni\w*|ouvert\w*|overture|uvertyr|opera|oper|operett\w*)\b/i;

@@ -83,7 +83,9 @@ const USE: Record<SourceId, string> = {
   rism:
     "The International Inventory of Musical Sources catalogues manuscripts and early prints in libraries worldwide. For works we have, it shows where copies are kept (the composer's own hand first), and how many libraries hold one, which says how widely a work was played before recordings.",
   libris:
-    "The Swedish union catalogue. We take the sheet music held by Musik- och teaterbiblioteket in Stockholm, which lends scores and parts (orchestral sets too) across Sweden: works we have get a link to borrow them, and works we didn't have, often Swedish, come in when the library states their instrumentation, in its own field or in the title (“variationer för blåskvintett”).",
+    "The Swedish union catalogue: the sheet music of Swedish libraries, KB's legal deposit copies, universities and music colleges among them. Musik- och teaterbiblioteket in Stockholm lends scores and parts (orchestral sets too) across Sweden: works we have get a link to borrow them there, or to the record of the libraries that have a copy. Works we didn't have, often Swedish, come in when a library states their instrumentation: in its own field, in its classification (“Xkeeb”: a string quartet) or in the title (“variationer för blåskvintett”).",
+  dnb:
+    "The German National Library's catalogue of sheet music, which publishers in Germany must deposit: every edition since 2000, new ones within weeks. Works we have get a link to their published editions; new works come in when the record names the composer and states the instrumentation, and isn't an arrangement or an anthology.",
   mutopia:
     "Volunteers' new engravings of public-domain music, free to download. Each piece is linked from the work it belongs to; many are single movements, so Mutopia adds links, not works.",
 };

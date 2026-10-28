@@ -31,12 +31,12 @@ test("/api describes the endpoints; /api/meta the dataset", async () => {
   const meta = await get<Meta>("/api/meta");
   assert.equal(meta.version, "20261009T000000Z");
   assert.equal(meta.sources.imslp.items, 13);
-  assert.equal(meta.works, 17); // 13 on IMSLP, 2 from Open Opus, 2 from LIBRIS
+  assert.equal(meta.works, 19); // 13 on IMSLP, 2 from Open Opus, 3 from LIBRIS, 1 from DNB
 });
 
 test("/api/lineups counts originals and arrangements per line-up", async () => {
   const { lineups } = await get<LineupsIndex>("/api/lineups");
-  assert.deepEqual(lineups[QUARTET], [5, 1]); // Debussy, Haydn, two from Open Opus, Hillborg from LIBRIS; Für Elise arranged
+  assert.deepEqual(lineups[QUARTET], [6, 1]); // Debussy, Haydn, two from Open Opus, two by Hillborg from LIBRIS; Für Elise arranged
   assert.deepEqual(lineups[WIND_QUINTET], [3, 1]); // Nielsen, Barber, Sund; Tchaikovsky's waltz arranged
   const one = await get<{ description: string; sources: Record<string, string[]> }>(`/api/lineups/${QUARTET}`);
   assert.equal(one.description, "2 violins, viola, cello");
@@ -45,17 +45,17 @@ test("/api/lineups counts originals and arrangements per line-up", async () => {
 
 test("works for a line-up: most established first, any spelling of the line-up", async () => {
   const page = await get<WorksPage>(`/api/works?lineup=${QUARTET}&facets=1`);
-  assert.equal(page.total, 5);
+  assert.equal(page.total, 6);
   assert.equal(page.works[0]!.title, "String Quartet in G minor, Op.10"); // 500 recordings, Wikipedia article
-  assert.deepEqual(page.works.map((w) => w.arrangement), [false, false, false, false, false]);
+  assert.deepEqual(page.works.map((w) => w.arrangement), [false, false, false, false, false, false]);
   for (let i = 1; i < page.works.length; i++) assert.ok(page.works[i]!.score <= page.works[i - 1]!.score);
   assert.equal(page.works[0]!.scoreUrl, "https://imslp.org/wiki/String_Quartet_in_G_minor%2C_Op.10_(Debussy%2C_Claude)");
-  assert.deepEqual(page.facets!.eras, { Romantic: 3, Classical: 1, Modern: 1 });
+  assert.deepEqual(page.facets!.eras, { Romantic: 3, Classical: 1, Modern: 2 });
 
   const same = await get<WorksPage>("/api/works?lineup=violin:2,viola,cello");
   assert.deepEqual(same.works, page.works.slice(0, same.works.length));
   const withArr = await get<WorksPage>(`/api/works?lineup=${QUARTET}&arrangements=1`);
-  assert.equal(withArr.total, 6);
+  assert.equal(withArr.total, 7);
   assert.equal(withArr.works.at(-1)!.title, "Für Elise, WoO 59"); // arrangements after originals
 });
 
@@ -303,7 +303,7 @@ test("a work: its line-ups, links, aliases and ranking", async () => {
   assert.deepEqual(w.scorings, [
     { lineup: "cello,clarinet,viola,violin*2", description: "clarinet, 2 violins, viola, cello", players: 5, arrangement: false, sources: [{ source: "imslp", ref: "For clarinet, 2 violins, viola, cello" }] },
   ]);
-  assert.deepEqual(w.links.map((l) => [l.provider, l.kind]), [["imslp", "score"], ["libris", "library"], ["rism", "library"], ["rism", "library"], ["openopus", "data"]]);
+  assert.deepEqual(w.links.map((l) => [l.provider, l.kind]), [["imslp", "score"], ["libris", "library"], ["rism", "library"], ["rism", "library"], ["swedish-libraries", "library"], ["dnb", "edition"], ["dnb", "edition"], ["openopus", "data"]]);
   assert.match(w.links[2]!.label!, /^Autograph manuscript/); // the composer's own hand first
   assert.equal(w.orchestration, null);
   const symphony = await get<WorkDetail>(`/api/works/${(await get<SearchResults>("/api/search?q=brahms op 98")).works[0]!.id}`);

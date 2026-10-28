@@ -22,6 +22,7 @@ const MIN_GAP_MS: Record<string, number> = {
   "www.mutopiaproject.org": 1000,
   "libris.kb.se": 1000,
   "data.dnb.de": 1000,
+  "services.dnb.de": 1000,
 };
 const MAX_ATTEMPTS = 6;
 

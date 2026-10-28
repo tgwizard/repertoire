@@ -4,7 +4,7 @@
 export const ERAS = ["Medieval", "Renaissance", "Baroque", "Classical", "Romantic", "Early 20th century", "Modern"] as const;
 export type Era = (typeof ERAS)[number];
 
-export type SourceId = "imslp" | "wikipedia" | "wikidata" | "openopus" | "musicbrainz" | "mutopia" | "libris" | "gnd" | "rism";
+export type SourceId = "imslp" | "wikipedia" | "wikidata" | "openopus" | "musicbrainz" | "mutopia" | "libris" | "gnd" | "dnb" | "rism";
 
 export interface SourceInfo {
   name: string;
@@ -36,7 +36,7 @@ export const SOURCES: Record<SourceId, SourceInfo> = {
     url: "https://libris.kb.se",
     license: "CC0",
     licenseUrl: CC0,
-    role: "Sheet music to borrow at Musik- och teaterbiblioteket, Stockholm",
+    role: "Sheet music in Swedish libraries, to borrow at Musik- och teaterbiblioteket, Stockholm",
   },
   gnd: {
     name: "GND",
@@ -44,6 +44,13 @@ export const SOURCES: Record<SourceId, SourceInfo> = {
     license: "CC0",
     licenseUrl: CC0,
     role: "Instrumentation, numbers and dates for works, contemporary ones too",
+  },
+  dnb: {
+    name: "DNB",
+    url: "https://portal.dnb.de",
+    license: "CC0",
+    licenseUrl: CC0,
+    role: "Editions of sheet music published since 2000, and new works",
   },
   rism: {
     name: "RISM",
@@ -101,11 +108,13 @@ export const score = (w: ScoreInput) => Math.round(scoreParts(w).reduce((s, p) =
 
 /**
  * Where to find a work or composer elsewhere. "score": sheet music to download;
- * "library": a copy to borrow; "reference": an article; "data": a database record.
+ * "library": a copy to borrow; "edition": a published edition, to buy;
+ * "reference": an article; "data": a database record.
  */
-export type LinkKind = "score" | "library" | "reference" | "data";
+export type LinkKind = "score" | "library" | "edition" | "reference" | "data";
 
-export type ProviderId = SourceId;
+/** Sources, and LIBRIS's records held by libraries other than Musik- och teaterbiblioteket */
+export type ProviderId = SourceId | "swedish-libraries";
 
 export const PROVIDERS: Record<ProviderId, { name: string; kind: LinkKind }> = {
   imslp: { name: "IMSLP", kind: "score" },
@@ -115,7 +124,9 @@ export const PROVIDERS: Record<ProviderId, { name: string; kind: LinkKind }> = {
   openopus: { name: "Open Opus", kind: "data" },
   mutopia: { name: "Mutopia", kind: "score" },
   libris: { name: "Musik- och teaterbiblioteket", kind: "library" },
+  "swedish-libraries": { name: "Swedish libraries (LIBRIS)", kind: "library" },
   gnd: { name: "German National Library (GND)", kind: "data" },
+  dnb: { name: "German National Library", kind: "edition" },
   rism: { name: "RISM", kind: "library" },
 };
 

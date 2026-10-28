@@ -16,6 +16,10 @@ function LinkItem({ l }: { l: WorkLink }) {
       ? "Sheet music on IMSLP"
       : l.provider === "libris"
         ? `Borrow from Musik- och teaterbiblioteket, Stockholm${l.label ? `: ${l.label}` : ""}`
+        : l.provider === "swedish-libraries"
+          ? `In Swedish libraries${l.label ? `: ${l.label}` : ""}`
+          : l.provider === "dnb"
+            ? l.label ?? "Published edition"
         : l.provider === "rism"
           ? l.label ?? "A source in RISM"
         : l.provider === "mutopia"
@@ -76,6 +80,7 @@ export function WorkPage({ id }: { id: string }) {
 
   const scores = w.links.filter((l) => l.kind === "score");
   const libraries = w.links.filter((l) => l.kind === "library");
+  const editions = w.links.filter((l) => l.kind === "edition");
   const elsewhere = w.links.filter((l) => l.kind === "reference" || l.kind === "data");
   const others = (more.data?.works ?? []).filter((o) => o.id !== w.id).slice(0, 5);
   // IMSLP's arrangements: under the line-up they're for, the rest (a "theatre orchestra")
@@ -91,8 +96,13 @@ export function WorkPage({ id }: { id: string }) {
   );
   // The era is the composer's; only a work that differs says so itself
   const workEra = w.era && w.era !== w.composer?.era ? w.era : null;
-  // Stockholm's copies under one heading rather than repeated on every line
-  const libris = libraries.filter((l) => l.provider === "libris" && l.url);
+  // Stockholm's copies, and other Swedish libraries', under a heading each rather than
+  // repeated on every line
+  const grouped = [
+    { heading: "Borrow from Musik- och teaterbiblioteket, Stockholm", links: libraries.filter((l) => l.provider === "libris" && l.url) },
+    { heading: "In other Swedish libraries (LIBRIS lists which)", links: libraries.filter((l) => l.provider === "swedish-libraries" && l.url) },
+  ].filter((g) => g.links.length > 1);
+  const inGroup = new Set(grouped.flatMap((g) => g.links));
   const rismPerson = composer.data?.links.find((l) => l.provider === "rism")?.url;
 
   return (
@@ -147,11 +157,11 @@ export function WorkPage({ id }: { id: string }) {
           <>
             <h3 className="subhead">In libraries</h3>
             <ul className="link-list">
-              {libris.length > 1 && (
-                <li>
-                  Borrow from Musik- och teaterbiblioteket, Stockholm
+              {grouped.map((g) => (
+                <li key={g.heading}>
+                  {g.heading}
                   <ul className="link-list nested">
-                    {libris.map((l) => (
+                    {g.links.map((l) => (
                       <li key={l.ref}>
                         <a href={l.url!} target="_blank" rel="noreferrer">
                           {l.label ?? "Catalogue record"}
@@ -160,9 +170,9 @@ export function WorkPage({ id }: { id: string }) {
                     ))}
                   </ul>
                 </li>
-              )}
+              ))}
               {libraries
-                .filter((l) => libris.length < 2 || !libris.includes(l))
+                .filter((l) => !inGroup.has(l))
                 .map((l) => (
                   <LinkItem key={l.provider + l.ref} l={l} />
                 ))}
@@ -181,7 +191,26 @@ export function WorkPage({ id }: { id: string }) {
             )}
           </>
         )}
-        {!scores.length && !libraries.length && (
+        {editions.length > 0 && (
+          <>
+            <h3 className="subhead">Published editions</h3>
+            <ul className="link-list">
+              <li>
+                In the German National Library's catalogue, newest first
+                <ul className="link-list nested">
+                  {editions.map((l) => (
+                    <li key={l.ref}>
+                      <a href={l.url!} target="_blank" rel="noreferrer">
+                        {l.label ?? "Catalogue record"}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            </ul>
+          </>
+        )}
+        {!scores.length && !libraries.length && !editions.length && (
           <p className="muted">No free score or library copy found. It may still be in copyright; look for it at a publisher or a music library.</p>
         )}
       </section>

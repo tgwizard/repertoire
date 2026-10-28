@@ -1,15 +1,22 @@
-// LIBRIS: the Swedish union catalogue (CC0). We take the sheet music held by
-// Musik- och teaterbiblioteket (library code X, formerly Statens musikbibliotek),
-// which lends scores and parts, orchestral sets included, throughout Sweden.
+// LIBRIS: the Swedish union catalogue (CC0). We take its sheet music: that held by
+// Musik- och teaterbiblioteket (library code X, formerly Statens musikbibliotek), which
+// lends scores and parts, orchestral sets included, throughout Sweden, and that of every
+// other library (KB's legal deposit copies, universities, music colleges, public libraries).
 
 import { ensembleKey, parseEnsembleKey, playerCount, type Ensemble } from "../../src/lib/instrumentation.ts";
 import { cached, fetchJson, jitteredMaxAge, progress, writeStage } from "../http.ts";
-import { instrumentsNamed, lineupFromTitle, SWEDISH } from "../title-lineup.ts";
+import { ANTHOLOGY, ARRANGED, instrumentsNamed, lineupFromTitle, SWEDISH } from "../title-lineup.ts";
 
 const PAGE = 200;
-const SEARCH =
-  "https://libris.kb.se/find.jsonld?q=*&@reverse.itemOf.heldBy.@id=https://libris.kb.se/library/X" +
-  "&and-instanceOf.category.@id=https://id.kb.se/term/rda/NotatedMusic&_stats=false";
+// In id order: unsorted, the order of equally relevant results drifts while we page,
+// and records slip between pages (5,500 of 155,000 once)
+const SEARCH = "https://libris.kb.se/find.jsonld?q=*&and-instanceOf.category.@id=https://id.kb.se/term/rda/NotatedMusic&_stats=false&_sort=@id";
+/** Musik- och teaterbiblioteket's library code */
+export const MTB = "X";
+// LIBRIS pages no further than 100,000 results into a search, and it has more sheet music
+// than that: two searches, Musik- och teaterbiblioteket's and everyone else's, each fits.
+const HELD_BY_X = "@reverse.itemOf.heldBy.@id=https://libris.kb.se/library/X";
+const SEARCHES = { x: `${SEARCH}&${HELD_BY_X}`, other: `${SEARCH}&not-${HELD_BY_X}` };
 
 export interface LibrisComposer {
   family: string;
@@ -40,6 +47,8 @@ export interface LibrisRecord {
   publisher: string | null;
   /** Shelf mark at Musik- och teaterbiblioteket */
   shelf: string | null;
+  /** Library codes of the libraries holding it ("X", "G", "LMu") */
+  held: string[];
   /** An anthology of several works */
   collection: boolean;
 }
@@ -88,7 +97,9 @@ export function extractRecord(item: any): LibrisRecord | null {
       agent: a["@id"] ? (/libris\.kb\.se\/([^#/]+)/.exec(a["@id"])?.[1] ?? null) : null,
     });
   }
-  const atX = list(item["@reverse"]?.itemOf).find((h: any) => /\/library\/X$/.test(h?.heldBy?.["@id"] ?? ""));
+  const holdings = list(item["@reverse"]?.itemOf);
+  const atX = holdings.find((h: any) => /\/library\/X$/.test(h?.heldBy?.["@id"] ?? ""));
+  const held = [...new Set(holdings.map((h: any) => /\/library\/([^/]+)$/.exec(h?.heldBy?.["@id"] ?? "")?.[1]).filter((c): c is string => !!c))].sort();
   const pub = list(item.publication)[0] ?? {};
   return {
     id,
@@ -102,6 +113,7 @@ export function extractRecord(item: any): LibrisRecord | null {
     year: year(pub.year ?? pub.date),
     publisher: pub.agent ? text(pub.agent.label) || null : null,
     shelf: atX ? text(atX.shelfMark?.label ?? atX.shelfControlNumber) || null : null,
+    held,
     collection: list(work.hasPart).length > 1,
   };
 }
@@ -129,17 +141,61 @@ export function librisLineup(medium: string[]): string | null {
   return ensembleKey(parts) || null;
 }
 
+// The library classification (KSSB, music: "X…") of editions for one line-up. Codes are
+// built up: Xe strings, Xea violin, Xeaa violin alone, Xeaa.02 two violins; Xk chamber
+// music, Xke strings, Xkeeb string quartet. KB publishes no list of them, so these are
+// the codes whose records agree with the line-ups their own fields or titles state, at
+// least 85% of 20 or more (all libraries' records, 2026-10; piano four hands, harpsichord
+// and viola alone fall short, at 74–84%). Codes for a keyboard and something else ("Xeai":
+// violin with piano, or with continuo, or a concerto in reduction) say less than a
+// line-up, as do those of most concertos (with an orchestra, or with strings).
+export const KSSB: Record<string, string> = {
+  Xda: "piano", Xdb: "organ",
+  Xeaa: "violin", "Xeaa.02": "violin*2", Xeca: "cello",
+  Xfaa: "flute", "Xfaa.02": "flute*2", "Xfaa.04": "flute*4", Xfda: "clarinet", "Xfda.02": "clarinet*2", Xfha: "horn",
+  Xga: "harp", Xgb: "guitar", Xgba: "guitar", "Xgb.02": "guitar*2", Xgd: "lute",
+  Xkeea: "cello,viola,violin", Xkeeb: "cello,viola,violin*2", Xkffb: "bassoon,clarinet,flute,horn,oboe", Xkfga: "horn,trombone,trumpet*2,tuba",
+  Xle: "orchestra", Xlbda: "orchestra,piano",
+  Xoaba: "piano,voice", Xpcc: "mixed chorus",
+};
+
+/**
+ * The line-up a record's classification gives, and the code that gives it: null when
+ * none of its codes is one of a line-up, or they name different ones. Codes for a
+ * collection ("Xda(s)") or exercises ("Xeb(ö)") don't count, and a record also classed
+ * as a stage work (Xr: a vocal score, a number from an opera), a composer's collected
+ * edition (Xb), popular or folk music (Xx, Xö), teaching material (Xu) or music of other
+ * traditions (Xv) has none.
+ */
+export function kssbLineup(codes: string[]): { lineup: string; code: string } | null {
+  if (codes.some((c) => /^X(?:r|b|x|ö|u|v)/.test(c.trim()))) return null;
+  const found = new Map<string, string>();
+  for (const c of codes) {
+    const m = /^(X[\w.]+?)\s*(?:\(([^)]*)\))?$/.exec(c.trim());
+    if (!m || /^(?:s|ö)$/.test(m[2] ?? "")) continue;
+    const lineup = KSSB[m[1]!];
+    if (lineup && !found.has(lineup)) found.set(lineup, c.trim());
+  }
+  if (found.size !== 1) return null;
+  const [lineup, code] = [...found][0]!;
+  return { lineup, code };
+}
+
 /**
  * A record's line-up, from its instrumentation field or the one its title spells out
  * ("variationer för blåskvintett"); most records only have the title. When both are
  * read: the same instruments → the field's (or the title's, if it counts more players);
  * the title adds some (a continuo) → the title's; otherwise the edition is likely an
- * arrangement of the work, and neither is the work's.
+ * arrangement of the work, and neither is the work's. With neither, the library's
+ * classification, unless the title says it's an arrangement or an anthology, or names a
+ * line-up we can't read ("pour la Harpe avec Accompagnement d'Orchestre": not "orchestra").
  */
-export function librisRecordLineup(r: Pick<LibrisRecord, "medium" | "title">): string | null {
+const classifiedOnly = (title: string) => !ARRANGED.test(title) && !ANTHOLOGY.test(title) && !/(?:^|[\s,(])(?:för|for|für|pour|per)\s/i.test(title);
+
+export function librisRecordLineup(r: Pick<LibrisRecord, "medium" | "title" | "kssb">): string | null {
   const field = librisLineup(r.medium);
   const title = lineupFromTitle(r.title);
-  if (!title) return field;
+  if (!title) return field ?? (classifiedOnly(r.title) ? (kssbLineup(r.kssb ?? [])?.lineup ?? null) : null);
   if (!field) return ensembleKey(title) || null;
   const f = parseEnsembleKey(field);
   const [named, titled] = [instrumentsNamed(f), instrumentsNamed(title)];
@@ -148,33 +204,44 @@ export function librisRecordLineup(r: Pick<LibrisRecord, "medium" | "title">): s
 }
 
 export async function crawlLibris(): Promise<void> {
-  console.log("LIBRIS: sheet music at Musik- och teaterbiblioteket");
-  const page = (offset: number) =>
-    cached(`libris:x:v1:${offset}`, jitteredMaxAge(`libris:${offset}`, 20, 40), async () => {
-      const res = await fetchJson<any>(`${SEARCH}&_limit=${PAGE}&_offset=${offset}`, { accept: "application/ld+json" });
-      return { total: res.totalItems as number, records: (res.items ?? []).map(extractRecord).filter(Boolean) as LibrisRecord[] };
-    });
-  const first = await page(0);
-  const total = first.value.total;
-  const records = [...first.value.records];
-  let oldest = first.fetchedAt;
-  const report = progress("LIBRIS pages", Math.ceil(total / PAGE));
-  for (let offset = PAGE, n = 1; offset < total; offset += PAGE, n++) {
-    const res = await page(offset);
-    records.push(...res.value.records);
-    oldest = Math.min(oldest, res.fetchedAt);
-    report(n + 1);
+  console.log("LIBRIS: sheet music in Swedish libraries");
+  const records: LibrisRecord[] = [];
+  let oldest = Date.now();
+  let total = 0;
+  for (const [name, search] of Object.entries(SEARCHES)) {
+    const page = (offset: number) =>
+      cached(`libris:${name}:v3:${offset}`, jitteredMaxAge(`libris:${name}:${offset}`, 20, 40), async () => {
+        const res = await fetchJson<any>(`${search}&_limit=${PAGE}&_offset=${offset}`, { accept: "application/ld+json" });
+        return { total: res.totalItems as number, records: (res.items ?? []).map(extractRecord).filter(Boolean) as LibrisRecord[] };
+      });
+    const first = await page(0);
+    const listed = first.value.total;
+    total += listed;
+    records.push(...first.value.records);
+    oldest = Math.min(oldest, first.fetchedAt);
+    const report = progress(`LIBRIS pages (${name === "x" ? "Musik- och teaterbiblioteket" : "other libraries"})`, Math.ceil(listed / PAGE));
+    for (let offset = PAGE, n = 1; offset < listed; offset += PAGE, n++) {
+      const res = await page(offset);
+      records.push(...res.value.records);
+      oldest = Math.min(oldest, res.fetchedAt);
+      report(n + 1);
+    }
   }
-  // Paging over a catalogue that changes can repeat a record at a page boundary.
+  // Paging over a catalogue that changes can repeat a record at a page boundary, or move it
+  // from one search to the other.
   const unique = [...new Map(records.map((r) => [r.id, r])).values()];
   console.log(`  ${unique.length} records (${total} listed)`);
   await writeStage("libris", { fetchedAt: oldest, total, records: unique } satisfies LibrisStage);
 }
 
-/** "1 part. (20 s.) + 4 st." → "Score and parts" (partitur = score, stämmor = parts) */
-export function librisHolding(r: Pick<LibrisRecord, "extent" | "publisher" | "year">): string {
+/**
+ * "1 part. (20 s.) + 4 st." → "Score and parts" (partitur = score, stämmor = parts); held
+ * elsewhere than Musik- och teaterbiblioteket, how many libraries have it
+ */
+export function librisHolding(r: Pick<LibrisRecord, "extent" | "publisher" | "year"> & { held?: string[] }): string {
   const parts = /\bst(?:ämmor|\.|\b)/i.test(r.extent);
   const score = /\bpart(?:itur|\.)/i.test(r.extent);
   const what = score && parts ? "Score and parts" : parts ? "Parts" : score ? "Score" : "Sheet music";
-  return [what, r.publisher, r.year].filter(Boolean).join(" · ");
+  const elsewhere = r.held && !r.held.includes(MTB) && r.held.length ? `${r.held.length} ${r.held.length === 1 ? "library" : "libraries"}` : null;
+  return [what, r.publisher, r.year, elsewhere].filter(Boolean).join(" · ");
 }

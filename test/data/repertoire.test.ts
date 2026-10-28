@@ -222,6 +222,33 @@ test("LIBRIS: works we have can be borrowed in Stockholm; Swedish works come in"
   assert.ok((meta.sources.libris?.added ?? 0) > 2000, `only ${meta.sources.libris?.added} works added from LIBRIS`);
 });
 
+test("LIBRIS: other Swedish libraries' copies; line-ups from the library's classification", async () => {
+  const meta = await api<Meta>("/api/meta");
+  assert.ok((meta.sources.libris?.items ?? 0) > 150_000, `only ${meta.sources.libris?.items} LIBRIS records`);
+  // Pelle Gudmundsen-Holmgreen's Last ground: a string quartet by its classification alone (Xkeeb)
+  const last = await api<WorksPage>(`/api/works?lineup=${key(STRING_QUARTET)}&q=${encodeURIComponent("last ground")}`);
+  assert.ok(last.works.some((w) => w.composer?.name === "Pelle Gudmundsen-Holmgreen"), "Last ground not listed for string quartet");
+  // One number of a set we have is an edition of the set, not a work of its own (Danzi, Op. 56 No. 2)
+  assert.equal((await search("Bläserquintett g-moll op. 56 Nr. 2 danzi")).works.filter((w) => /^Bläserquintett/.test(w.title)).length, 0);
+});
+
+test("DNB: published editions of works we have, and new works", async () => {
+  const meta = await api<Meta>("/api/meta");
+  assert.ok((meta.sources.dnb?.matched ?? 0) > 25_000, `only ${meta.sources.dnb?.matched} DNB editions matched`);
+  assert.ok((meta.sources.dnb?.added ?? 0) > 5_000, `only ${meta.sources.dnb?.added} works added from DNB`);
+  const [brahms] = (await search("brahms clarinet quintet op 115")).works;
+  const w = await api<WorkDetail>(`/api/works/${brahms!.id}`);
+  assert.ok(w.links.some((l) => l.provider === "dnb" && l.kind === "edition" && l.url?.startsWith("https://d-nb.info/")), "no DNB edition");
+  // Nicola Campogrande's 150 Decibel (2025), for viola and piano and for cello and piano: one work
+  const [decibel] = (await search("campogrande 150 decibel")).works;
+  assert.ok(decibel, "150 Decibel not found");
+  const d = await api<WorkDetail>(`/api/works/${decibel.id}`);
+  assert.deepEqual(d.scorings.map((s) => s.lineup).sort(), ["cello,piano", "piano,viola"]);
+  // An edition of a work IMSLP has under another title, by its opus number: not a new work
+  const tchaikovsky = await search("capriccio italien tchaikovsky");
+  assert.ok(!tchaikovsky.works.some((x) => /^Capriccio italien/i.test(x.title)), "Capriccio italien duplicated");
+});
+
 test("works people found missing: a Swedish wind quintet; one arranger's arrangements", async () => {
   // Robert Sund's Per spelman: in LIBRIS, its line-up only in the title ("variationer för blåskvintett")
   const sund = await api<WorksPage>(`/api/works?lineup=${key(WIND_QUINTET)}&q=${encodeURIComponent("per spelman")}`);

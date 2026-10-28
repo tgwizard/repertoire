@@ -67,6 +67,7 @@ export const SOURCE_MAX_AGE_DAYS: Record<SourceId, number> = {
   musicbrainz: 30, // counts trickle in, a budget per run
   libris: 60, // result pages cached 20–40 days; the oldest counts
   gnd: 90, // a dump, downloaded every 60 days
+  dnb: 150, // searches by year: this year and last cached 7–14 days, older years 60–120
   rism: 75, // exports, downloaded every 45 days
 };
 

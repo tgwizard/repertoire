@@ -107,12 +107,12 @@ CREATE TABLE arrangements (
   PRIMARY KEY (work_id, position)
 ) WITHOUT ROWID;
 
--- Where to find works and composers: sheet music, articles, database records
+-- Where to find works and composers: sheet music, library copies, editions, articles, database records
 CREATE TABLE links (
   entity TEXT NOT NULL,               -- 'work' or 'composer'
   entity_id TEXT NOT NULL,
-  provider TEXT NOT NULL,             -- imslp, wikipedia, wikidata, musicbrainz, openopus
-  kind TEXT NOT NULL,                 -- score, library, reference, data
+  provider TEXT NOT NULL,             -- a source (imslp, wikipedia, wikidata, musicbrainz, openopus, mutopia, libris, gnd, dnb, rism), or swedish-libraries (LIBRIS records not at Musik- och teaterbiblioteket)
+  kind TEXT NOT NULL,                 -- score, library, edition (published, to buy), reference, data
   ref TEXT NOT NULL,                  -- the provider's id (IMSLP page id, QID, …)
   url TEXT,
   label TEXT,
