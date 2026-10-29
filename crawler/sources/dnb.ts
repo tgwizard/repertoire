@@ -7,7 +7,7 @@
 
 import { ensembleKey, type Ensemble } from "../../src/lib/instrumentation.ts";
 import { cached, fetchText, jitteredMaxAge, progress, writeStage } from "../http.ts";
-import { lineupFromTitle } from "../title-lineup.ts";
+import { ADDS_PERFORMERS, ensembleTitle, lineupFromTitle } from "../title-lineup.ts";
 import { gndLineup, type GndMedium } from "./gnd.ts";
 
 const SRU = "https://services.dnb.de/sru/dnb.dma?version=1.1&operation=searchRetrieve&recordSchema=MARC21-xml";
@@ -26,12 +26,20 @@ export interface DnbRecord {
   composer: { gnd: string | null; name: string; born: number | null; died: number | null } | null;
   /** More than one composer (100 and 700 $4 cmp): an anthology or a joint work */
   composers: number;
-  /** The work it's an edition of (MARC 240) */
+  /** The work it's an edition of (MARC 240). Its media are GND's German terms ("Violine (2)"), or in records from WorldCat a list in English ("violins (2), viola, cello") */
   work: { gnd: string | null; title: string; media: GndMedium[]; arranged: boolean; selection: boolean } | null;
+  /** The medium of performance (MARC 382), one instrument and its count to a field in K10plus ("alto saxophone", 1); DNB has none */
+  medium?: GndMedium[];
+  /** The DNB record this is a copy of (MARC 016 $2 DE-101), in other catalogues */
+  copyOf?: string | null;
   /** Someone arranged it, or the edition says so */
   arranged: boolean;
   /** Part of a series or a larger publication, or one with contents of its own: not one work */
   collection: boolean;
+  /** Part of a larger publication (MARC 773) */
+  partOf?: boolean;
+  /** Its contents note (MARC 505): the works in it, or in K10plus often its movements or parts */
+  contents?: string;
   year: number | null;
   publisher: string | null;
   /** "1 Partitur (26 Seiten), 4 Stimmen" */
@@ -96,8 +104,11 @@ export function parseRecord(xml: string): DnbRecord | null {
   if (!title) return null;
 
   const people = fs.filter((f) => f.tag === "100" || f.tag === "700");
-  const composing = people.filter((f) => f.tag === "100" ? !roles(f).length || roles(f).some((r) => r === "cmp" || r === "komponist") : roles(f).some((r) => r === "cmp" || r === "komponist"));
-  const main = composing.find((f) => f.tag === "100") ?? null;
+  // The main entry is the composer unless its role says otherwise (older K10plus records
+  // call composers authors, "aut"); others are when their role says so
+  const composer = (r: string) => r === "cmp" || r === "komponist" || r === "komponistin";
+  const composing = people.filter((f) => (f.tag === "100" ? !roles(f).length || roles(f).some((r) => composer(r) || r === "aut") : roles(f).some(composer)));
+  const main = composing.find((f) => f.tag === "100") ?? (composing.length === 1 ? composing[0]! : null);
   const life = /^(\d{4})?\s*-\s*(\d{4})?/.exec(first(main ?? undefined, "d") ?? "");
   // "Höhlein, Detlef" → "Detlef Höhlein"
   const name = first(main ?? undefined, "a")?.replace(/^([^,]+),\s*(.+)$/, "$2 $1") ?? null;
@@ -120,6 +131,16 @@ export function parseRecord(xml: string): DnbRecord | null {
   const arranged =
     !!work?.arranged || people.some((f) => roles(f).some((r) => r === "arr" || r === "arrangeur" || r === "bearbeiter")) || /\b(?:arr\.|arrangiert|arrangement|bearb(?:\.|eitet|eitung))/i.test(statement);
 
+  const medium = fs
+    .filter((f) => f.tag === "382")
+    .flatMap((f) => {
+      const names = all(f, "a");
+      const counts = all(f, "n").map(Number);
+      return names.map((name) => ({ name, count: names.length === 1 && counts.length === 1 ? counts[0]! || 1 : 1 }));
+    });
+  const copy = fs.find((f) => f.tag === "016" && first(f, "2") === "DE-101");
+  const contents = fs.filter((f) => f.tag === "505").flatMap((f) => [...all(f, "a"), ...all(f, "t")]).join(" -- ");
+  const partOf = fs.some((f) => f.tag === "773");
   const f264 = fs.filter((f) => f.tag === "264");
   const published = f264.find((f) => first(f, "b")) ?? f264[0];
   const year = Number(/\b(1[89]\d{2}|20\d{2})\b/.exec(f264.map((f) => first(f, "c") ?? "").join(" "))?.[1]) || null;
@@ -135,12 +156,17 @@ export function parseRecord(xml: string): DnbRecord | null {
     year,
     publisher: first(published, "b"),
     extent: fs.filter((f) => f.tag === "300").map((f) => first(f, "a")).filter(Boolean).join("; "),
+    ...(medium.length ? { medium } : {}),
+    ...(copy ? { copyOf: first(copy, "a") } : {}),
+    ...(partOf ? { partOf } : {}),
+    ...(contents ? { contents } : {}),
   };
 }
 
 /** The records in one SRU response, and how many the search found. */
 export function parseResponse(xml: string): { total: number; records: DnbRecord[] } {
-  const total = Number(/<numberOfRecords>(\d+)<\/numberOfRecords>/.exec(xml)?.[1] ?? 0);
+  // K10plus prefixes SRU's elements ("zs:numberOfRecords"), DNB doesn't
+  const total = Number(/<(?:\w+:)?numberOfRecords>(\d+)<\/(?:\w+:)?numberOfRecords>/.exec(xml)?.[1] ?? 0);
   const records = [...xml.matchAll(/<record xmlns="http:\/\/www\.loc\.gov\/MARC21\/slim"[^>]*>([\s\S]*?)<\/record>/g)]
     .map((m) => parseRecord(m[1]!))
     .filter((r): r is DnbRecord => !!r);
@@ -148,17 +174,45 @@ export function parseResponse(xml: string): { total: number; records: DnbRecord[
 }
 
 /**
- * The line-up an edition gives its work: the work's instrumentation (its record's,
- * in GND's German), else the one the title spells out ("für Violine solo"). When both are
- * read and differ, the edition is probably an arrangement, and neither counts.
+ * Instruments as a line-up: GND's German terms ("Querflöte", "Violine" 2), else English
+ * ones (the Library of Congress's: "flute", "violins (2), viola, cello"); null if any is
+ * unknown or qualified ("piano (prepared)").
  */
-export function dnbLineup(r: Pick<DnbRecord, "title" | "remainder" | "work">): Ensemble | null {
-  const fromWork = r.work?.media.length ? gndLineup(r.work.media) : null;
+export function mediaLineup(media: GndMedium[]): Ensemble | null {
+  if (!media.length) return null;
+  const german = gndLineup(media);
+  if (german) return german;
+  const text = media
+    .map((m) => (m.count > 1 ? `${m.count} ${m.name}` : m.name))
+    .join(", ")
+    .replace(/([^,]+?) \((\d+)\)/g, (_, name: string, n: string) => `${n} ${name.trim()}`);
+  return /[()]/.test(text) ? null : lineupFromTitle(`for ${text}`);
+}
+
+/**
+ * The line-up an edition gives its work: the work's instrumentation (its record's,
+ * in GND's German), the edition's medium of performance, and the one the title spells
+ * out ("für Violine solo"). When two are read and differ, the edition is probably an
+ * arrangement, and none counts.
+ */
+export function dnbLineup(r: Pick<DnbRecord, "title" | "remainder" | "work" | "medium">, { basic = false } = {}): Ensemble | null {
   // Before any parallel title in another language ("= 10 little Songs : for high voice …")
   const printed = [r.title, r.remainder?.split(/\s+=\s+/)[0]].filter(Boolean).join(" ");
-  const fromTitle = lineupFromTitle(printed);
-  if (fromWork && fromTitle && ensembleKey(fromWork) !== ensembleKey(fromTitle)) return null;
-  return fromWork ?? fromTitle;
+  // The title's "für …", else an ensemble's name as the title ("Bläserquintett B-Dur"), else
+  // a list of instruments after it ("Quintet" "flute, oboe, clarinet, horn and bassoon")
+  // (basic: only GND's terms and "für …", as DNB's records were first read)
+  if (basic) {
+    const read = [r.work?.media.length ? gndLineup(r.work.media) : null, lineupFromTitle(printed)].filter((l): l is Ensemble => !!l);
+    return new Set(read.map(ensembleKey)).size > 1 ? null : (read[0] ?? null);
+  }
+  const fromTitle =
+    lineupFromTitle(printed) ??
+    (r.remainder && ADDS_PERFORMERS.test(` ${r.remainder} `) ? null : ensembleTitle(r.title)) ??
+    // (not "mit Bariton": that adds to the title's)
+    (r.remainder && !/^(?:mit|with|avec|con|med|och|und|and|et|plus|\+)\s/i.test(r.remainder) ? ["for", "für", "pour", "per"].map((p) => lineupFromTitle(`${r.title} ${p} ${r.remainder!.split(/\s+=\s+/)[0]}`)).find(Boolean) ?? null : null);
+  const read = [r.work?.media.length ? mediaLineup(r.work.media) : null, r.medium?.length ? mediaLineup(r.medium) : null, fromTitle].filter((l): l is Ensemble => !!l);
+  if (new Set(read.map(ensembleKey)).size > 1) return null;
+  return read[0] ?? null;
 }
 
 /** "Score and parts · Schott · 2025" (Partitur = score, Stimmen = parts) */

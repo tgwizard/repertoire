@@ -177,7 +177,7 @@ export const ARRANGED =
 
 /** Titles of anthologies and songbooks, not of a work */
 export const ANTHOLOGY =
-  /\b(?:ausgewählte|selected|collected|miscellaneous|valda|samlade|sämtliche|gesammelte|complete works|œuvres choisies|best of|bästa|hits|medley|album|songbook|collection|samling|anthology|kompositionen|compositions|\w*werke|works|spielstücke)\b/i;
+  /\b(?:ausgewählte|selected|collected|miscellaneous|valda|samlade|sämtliche|gesammelte|complete works|œuvres choisies|best of|bästa|hits|medley|album|songbook|collection|samling|anthology|kompositionen|compositions|\w*werke|works|spielstücke|orchesterstudien|orchesterstellen|orchestral (?:studies|excerpts)|probespiel\w*)\b/i;
 
 // An orchestral or stage genre "for piano" (or organ) is a reduction of it
 const ORCHESTRAL_GENRE = /\b(?:symphon\w*|sinfoni\w*|ouvert\w*|overture|uvertyr|opera|oper|operett\w*)\b/i;
@@ -251,8 +251,14 @@ export function lineupFromTitle(title: string): Ensemble | null {
   const found = new Map<string, Ensemble>();
   for (const m of t.matchAll(/(?:^|[\s,(])(för|for|für|pour|per)\s+/g)) {
     const lang = LANGUAGES[m[1]!]!;
-    // Up to the first mark that ends a list of instruments
-    let phrase = t.slice(m.index! + m[0].length).replace(TAIL, "").split(/\s*(?:[:;/[\]=(]|\s[-–—]\s|\.\s)/)[0]!;
+    // Up to the first mark that ends a list of instruments. A slash between words joins
+    // alternatives: the first is the line-up ("Flöte/Violine und Gitarre": flute and
+    // guitar; "alto/tenor saxophone", "Trompete in B/C")
+    const rest = t
+      .slice(m.index! + m[0].length)
+      .replace(/(?<=[^\s/])\/[^\s/,;:()[\]]+/g, "")
+      .replace(TAIL, "");
+    let phrase = rest.split(/\s*(?:[:;/[\]=(]|\s[-–—]\s|\.\s)/)[0]!;
     phrase = phrase
       .replace(/\b(?:4|four|fyra|vier|quatre|quattro)[\s-]?(?:hands|händer|händen|händig|mains|mani)\b/g, "4 hands")
       .replace(/\b(piano|klavier|pianoforte)\s+(?:zu\s+|à\s+|a\s+)?4 hands\b/, "$1 4 hands")
@@ -271,6 +277,34 @@ export function lineupFromTitle(title: string): Ensemble | null {
   if (lineup && ORCHESTRAL_GENRE.test(t) && Object.keys(lineup).every((id) => KEYBOARDS.has(id))) return null;
   return lineup;
 }
+
+// The names of ensembles of two or more players, in every language we read
+const ENSEMBLE_NAMES = new Map(
+  [ENGLISH, SWEDISH, NORDIC, GERMAN, FRENCH, ITALIAN].flatMap((words) =>
+    Object.entries(words).filter((e): e is [string, Ensemble] => typeof e[1] === "object" && Object.values(e[1]).reduce((a, b) => a + b, 0) >= 2),
+  ),
+);
+
+/**
+ * A title that is an ensemble's name, with at most a number, key or year after it
+ * ("Bläserquintett B-Dur, op. 88,5", "Woodwind quintet (1948)", "3. Bläserquintett"):
+ * that ensemble. Not a plural ("Bläserquintette": a set), an arrangement or an anthology.
+ */
+export function ensembleTitle(title: string): Ensemble | null {
+  const t = title.normalize("NFC").toLowerCase().replace(/\s+/g, " ").trim();
+  if (ARRANGED.test(t) || ANTHOLOGY.test(t) || ADDS_PERFORMERS.test(t)) return null;
+  const head = t
+    .replace(/^\d+\.\s*/, "")
+    .replace(/\s+(?:nr|no|n)\.?\s*\d+[a-z]?\b/, "")
+    .replace(TAIL, "")
+    .split(/\s*(?:[,:;/[\]=(]|\s[-–—]\s|\.\s)/)[0]!
+    .replace(TAIL, "")
+    .trim();
+  return ENSEMBLE_NAMES.get(head) ?? null;
+}
+
+/** Words that add performers to an ensemble ("Streichquartett mit Bariton", "and piano") */
+export const ADDS_PERFORMERS = /(?:^|\s)(?:mit|with|avec|con|med|och|und|and|et|plus|\+)\s/i;
 
 /**
  * The title without the line-up it spells out, for matching other sources' titles:

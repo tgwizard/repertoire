@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ensembleKey } from "../src/lib/instrumentation.ts";
-import { lineupFromTitle, onlyGenre, withoutLineup } from "./title-lineup.ts";
+import { ensembleTitle, lineupFromTitle, onlyGenre, withoutLineup } from "./title-lineup.ts";
 
 const key = (title: string) => {
   const e = lineupFromTitle(title);
@@ -57,4 +57,30 @@ test("titles less their line-up, to match other sources' titles; a genre alone n
   assert.equal(withoutLineup("Love for sale"), null);
   assert.ok(onlyGenre("Sonat") && onlyGenre("Trio nr 1, op. 6") && onlyGenre("Svit nr 2"));
   assert.ok(!onlyGenre("Danzas argentinas") && !onlyGenre("Processionsmusik"));
+});
+
+test("a title that is an ensemble's name, with a number, key or year after it", () => {
+  const key = (t: string) => {
+    const l = ensembleTitle(t);
+    return l && ensembleKey(l);
+  };
+  assert.equal(key("Bläserquintett B-Dur, op. 88,5"), "bassoon,clarinet,flute,horn,oboe");
+  assert.equal(key("Woodwind quintet (1948)"), "bassoon,clarinet,flute,horn,oboe");
+  assert.equal(key("3. Bläserquintett op. 29"), "bassoon,clarinet,flute,horn,oboe");
+  assert.equal(key("Streichquartett Nr. 2"), "cello,viola,violin*2");
+  assert.equal(key("Quintette à vent"), "bassoon,clarinet,flute,horn,oboe");
+  assert.equal(key("Bläserquintette"), null); // a set
+  assert.equal(key("Bläserquintett-Satz"), null);
+  assert.equal(key("Music for wind quintet"), null); // "for …" is lineupFromTitle's
+  assert.equal(key("Wind quintet, arr. for brass"), null);
+  assert.equal(key("Streichquartett Nr. 8 mit Bariton"), null); // more players than the ensemble
+  assert.equal(key("Streichquartett Nr. 8"), "cello,viola,violin*2");
+});
+
+test("of alternatives joined by a slash, the first; orchestral excerpts, none", () => {
+  assert.equal(key("Calculated wounds, for alto/tenor/baritone saxophone & piano"), "alto saxophone,piano");
+  assert.equal(key("Serenade für Flöte/Violine und Gitarre"), "flute,guitar");
+  assert.equal(key("Drei Inventionen für Trompete in B/C und Cembalo"), "harpsichord,trumpet");
+  assert.equal(key("Sonate für Violine und Klavier / Johannes Brahms"), "piano,violin");
+  assert.equal(key("Orchesterstudien für Viola"), null);
 });

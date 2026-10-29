@@ -19,6 +19,14 @@ const dnb = (id: string, title: string, remainder: string | null, composer: { gn
   arranged: false, collection: false, year, publisher: "Breitkopf & Härtel", extent: "1 Partitur, 1 Stimme",
 });
 
+// A K10plus record: as DNB's, with the edition's medium of performance (MARC 382)
+const k10 = (id: string, title: string, composer: { gnd: string | null; name: string; born: number | null }, work: { gnd: string; title: string } | null, medium: [string, number][]) => ({
+  ...dnb(id, title, null, composer, work, 2023),
+  publisher: "Donemus",
+  medium: medium.map(([name, count]) => ({ name, count })),
+});
+const WIND_QUINTET: [string, number][] = [["flute", 1], ["oboe", 1], ["clarinet", 1], ["horn", 1], ["bassoon", 1]];
+
 const imslpWork = (pageid: number, title: string, era: string | null, recorded = false) => ({ pageid, title, era: era as never, recorded, audio: false });
 
 /**
@@ -167,6 +175,22 @@ export function fixtureInput(later = false): BuildInput {
         dnb("dnoid", "Zwei Stücke", "für Oboe und Klavier", { gnd: null, name: "B. Nobody", born: 1960 }, null, 2025),
       ],
     },
+    k10plus: {
+      fetchedAt: T,
+      firstYear: 2000,
+      total: 4,
+      records: [
+        // Another edition of a work we have, by the GND work it names: a link.
+        k10("k115", "Quintet for clarinet and strings, op. 115", { gnd: "118514229", name: "Johannes Brahms", born: 1833 }, { gnd: "300011511", title: "Quintette, op. 115" }, [["clarinet", 1], ["violin", 2], ["viola", 1], ["cello", 1]]),
+        // A new work, its line-up only in the medium of performance; the composer by GND id.
+        k10("kq1", "Quintetto a fiato n. 1", { gnd: "1080149961", name: "Nicola Campogrande", born: 1969 }, null, WIND_QUINTET),
+        // The composer by full name and birth year (a record from WorldCat names no GND id);
+        // another work than no. 1.
+        k10("kq2", "Quintetto a fiato n. 2", { gnd: null, name: "Nicola Campogrande", born: 1969 }, null, WIND_QUINTET),
+        // A composer we don't know, without a GND id: no new work.
+        k10("kq3", "Quintet", { gnd: null, name: "C. Nobody", born: 1970 }, null, WIND_QUINTET),
+      ],
+    },
     rism: {
       fetchedAt: T,
       people: { "2": { gnd: null, wikidata: "Q11" } },
@@ -204,6 +228,11 @@ export function fixtureInput(later = false): BuildInput {
         { ...libris("lbg115", "Clarinet quintet, op. 115", "Kvintett, op. 115", "Brahms", "Johannes", 1833, 1897, [], "1 part."), held: ["G", "LMu"] },
         // A line-up only the classification gives: comes in.
         { ...libris("lbk2", "Kvartett nr 2", null, "Hillborg", "Anders", 1954, null, [], "4 st."), kssb: ["Xkeeb"], held: ["G"] },
+        // No dates for the composer, in the record or the authority: by full name, the one
+        // composer we know by it.
+        { ...libris("lbn43", "Blæserkvintet, op. 43", "Kvintett, op. 43", "Nielsen", "Carl", 0, null, [], "5 st."), composers: [{ family: "Nielsen", given: "Carl", born: null, died: null, agent: null }] },
+        // No dates, and no composer we know by that name: nothing.
+        { ...libris("lbnd", "Kvintett för blåsare", null, "Okänd", "Ingen", 0, null, [], "5 st."), composers: [{ family: "Okänd", given: "Ingen", born: null, died: null, agent: null }] },
       ],
     },
     mutopia: {

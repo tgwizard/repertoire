@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ensembleKey, parseEnsembleKey } from "../../src/lib/instrumentation.ts";
-import { extractRecord, KSSB, kssbLineup, librisLineup, librisRecordLineup } from "./libris.ts";
+import { agentLife, extractRecord, KSSB, kssbLineup, librisLineup, librisRecordLineup } from "./libris.ts";
 
 test("LIBRIS instrumentation in Swedish becomes a line-up, or nothing", () => {
   assert.equal(librisLineup(["flöjt, violin, viola (2), violoncell"]), "cello,flute,viola*2,violin");
@@ -80,4 +80,13 @@ test("a LIBRIS search result reduces to the fields we use", () => {
     held: ["LMu", "X"],
     collection: false,
   });
+});
+
+test("a composer's dates from their authority record: its life span, else its description", () => {
+  const person = (p: object) => ({ "@graph": [{ "@type": "Record" }, { "@type": "Person", familyName: "Berkeley", ...p }] });
+  assert.deepEqual(agentLife(person({ description: ["Engelsk tonsättare, 1903-1989"] })), { born: 1903, died: 1989 });
+  assert.deepEqual(agentLife(person({ lifeSpan: "1938-" })), { born: 1938, died: null });
+  assert.deepEqual(agentLife(person({ description: ["Svensk tonsättare, född 1971"] })), { born: 1971, died: null });
+  assert.deepEqual(agentLife(person({ description: ["Organist i Uppsala"] })), { born: null, died: null });
+  assert.deepEqual(agentLife(null), { born: null, died: null });
 });

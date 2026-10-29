@@ -25,6 +25,8 @@ export interface LibrisComposer {
   died: number | null;
   /** LIBRIS agent id */
   agent: string | null;
+  /** The dates are from the authority record, not the edition's */
+  datesFromAuthority?: true;
 }
 
 export interface LibrisRecord {
@@ -231,7 +233,35 @@ export async function crawlLibris(): Promise<void> {
   // from one search to the other.
   const unique = [...new Map(records.map((r) => [r.id, r])).values()];
   console.log(`  ${unique.length} records (${total} listed)`);
+  // A composer linked to LIBRIS's authority record has their dates there, not in the
+  // record of the edition ("Engelsk tonsättare, 1903-1989")
+  const dateless = [...new Set(unique.flatMap((r) => r.composers.filter((c) => c.agent && !c.born).map((c) => c.agent!)))];
+  const lives = new Map<string, { born: number | null; died: number | null }>();
+  const report = progress("LIBRIS composers without dates", dateless.length);
+  // (A request that fails isn't cached as "no dates", and keeps an older answer if there's
+  // one; authority records change seldom, so their age isn't the source's)
+  for (const [i, agent] of dateless.entries()) {
+    try {
+      const res = await cached(`libris:agent:v1:${agent}`, jitteredMaxAge(`libris:agent:${agent}`, 120, 240), async () =>
+        agentLife(await fetchJson<any>(`https://libris.kb.se/${agent}/data.jsonld`, { accept: "application/ld+json" })),
+      );
+      if (res.value.born) lives.set(agent, res.value);
+    } catch (e) {
+      console.warn(`  ${agent}: ${(e as Error).message}`);
+    }
+    report(i + 1);
+  }
+  for (const r of unique) for (const c of r.composers) if (c.agent && !c.born && lives.has(c.agent)) Object.assign(c, lives.get(c.agent), { datesFromAuthority: true });
+  console.log(`  ${lives.size} of ${dateless.length} composers without dates have them in their authority record`);
   await writeStage("libris", { fetchedAt: oldest, total, records: unique } satisfies LibrisStage);
+}
+
+/** A person's life years from their authority record: its life span, else its description. */
+export function agentLife(doc: any): { born: number | null; died: number | null } {
+  const person = list(doc?.["@graph"]).find((n: any) => n?.["@type"] === "Person");
+  const text = [person?.lifeSpan, ...list(person?.description)].filter((t) => typeof t === "string").join(" ");
+  const span = /\b(1[2-9]\d\d|20[0-2]\d)\s*[-–]\s*(1[2-9]\d\d|20[0-2]\d)?/.exec(text) ?? /\bf(?:ödd|\.)\s*(1[2-9]\d\d|20[0-2]\d)/.exec(text);
+  return { born: span?.[1] ? Number(span[1]) : null, died: span?.[2] ? Number(span[2]) : null };
 }
 
 /**

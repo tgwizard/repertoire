@@ -31,13 +31,13 @@ test("/api describes the endpoints; /api/meta the dataset", async () => {
   const meta = await get<Meta>("/api/meta");
   assert.equal(meta.version, "20261009T000000Z");
   assert.equal(meta.sources.imslp.items, 13);
-  assert.equal(meta.works, 19); // 13 on IMSLP, 2 from Open Opus, 3 from LIBRIS, 1 from DNB
+  assert.equal(meta.works, 21); // 13 on IMSLP, 2 from Open Opus, 3 from LIBRIS, 1 from DNB, 2 from K10plus
 });
 
 test("/api/lineups counts originals and arrangements per line-up", async () => {
   const { lineups } = await get<LineupsIndex>("/api/lineups");
   assert.deepEqual(lineups[QUARTET], [6, 1]); // Debussy, Haydn, two from Open Opus, two by Hillborg from LIBRIS; Für Elise arranged
-  assert.deepEqual(lineups[WIND_QUINTET], [3, 1]); // Nielsen, Barber, Sund; Tchaikovsky's waltz arranged
+  assert.deepEqual(lineups[WIND_QUINTET], [5, 1]); // Nielsen, Barber, Sund, Campogrande's two; Tchaikovsky's waltz arranged
   const one = await get<{ description: string; sources: Record<string, string[]> }>(`/api/lineups/${QUARTET}`);
   assert.equal(one.description, "2 violins, viola, cello");
   assert.deepEqual(Object.keys(one.sources).sort(), ["imslp", "libris", "openopus"]);
@@ -107,6 +107,8 @@ test("smaller groups: every line-up drawn from the players, largest first", asyn
       [5, "Summer Music, Op.31"], // a Wikipedia article and category outrank Nielsen's bare IMSLP page here
       [5, "Wind Quintet, Op.43"],
       [5, "Per spelman, variationer för blåskvintett"],
+      [5, "Quintetto a fiato n. 2"],
+      [5, "Quintetto a fiato n. 1"],
       [3, "Trio for Flute, Oboe and Piano"],
       [2, "Sonata in E minor, HWV 359b"],
       [1, "Für Elise, WoO 59"],
@@ -116,14 +118,14 @@ test("smaller groups: every line-up drawn from the players, largest first", asyn
     page.facets!.lineups.map((l) => [l.key, l.count]),
     [
       ["bassoon,clarinet,flute,horn,oboe,piano", 1],
-      [WIND_QUINTET, 3],
+      [WIND_QUINTET, 5],
       ["flute,oboe,piano", 1],
       ["flute,piano", 1],
       ["piano", 1],
     ],
   );
   const twoPlus = await get<WorksPage>(`/api/works?lineup=flute,oboe,clarinet,bassoon,horn,piano&subsets=1&min_players=2`);
-  assert.equal(twoPlus.total, 6);
+  assert.equal(twoPlus.total, 8);
 });
 
 test("orchestral works an orchestra can play, or scored for exactly it; how many have no known scoring", async () => {
@@ -303,8 +305,8 @@ test("a work: its line-ups, links, aliases and ranking", async () => {
   assert.deepEqual(w.scorings, [
     { lineup: "cello,clarinet,viola,violin*2", description: "clarinet, 2 violins, viola, cello", players: 5, arrangement: false, sources: [{ source: "imslp", ref: "For clarinet, 2 violins, viola, cello" }] },
   ]);
-  assert.deepEqual(w.links.map((l) => [l.provider, l.kind]), [["imslp", "score"], ["libris", "library"], ["rism", "library"], ["rism", "library"], ["swedish-libraries", "library"], ["dnb", "edition"], ["dnb", "edition"], ["openopus", "data"]]);
-  assert.match(w.links[2]!.label!, /^Autograph manuscript/); // the composer's own hand first
+  assert.deepEqual(w.links.map((l) => [l.provider, l.kind]), [["imslp", "score"], ["k10plus", "library"], ["libris", "library"], ["rism", "library"], ["rism", "library"], ["swedish-libraries", "library"], ["dnb", "edition"], ["dnb", "edition"], ["openopus", "data"]]);
+  assert.match(w.links[3]!.label!, /^Autograph manuscript/); // the composer's own hand first
   assert.equal(w.orchestration, null);
   const symphony = await get<WorkDetail>(`/api/works/${(await get<SearchResults>("/api/search?q=brahms op 98")).works[0]!.id}`);
   assert.deepEqual(symphony.orchestration, {

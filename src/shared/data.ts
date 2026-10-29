@@ -4,7 +4,7 @@
 export const ERAS = ["Medieval", "Renaissance", "Baroque", "Classical", "Romantic", "Early 20th century", "Modern"] as const;
 export type Era = (typeof ERAS)[number];
 
-export type SourceId = "imslp" | "wikipedia" | "wikidata" | "openopus" | "musicbrainz" | "mutopia" | "libris" | "gnd" | "dnb" | "rism";
+export type SourceId = "imslp" | "wikipedia" | "wikidata" | "openopus" | "musicbrainz" | "mutopia" | "libris" | "gnd" | "dnb" | "k10plus" | "rism";
 
 export interface SourceInfo {
   name: string;
@@ -51,6 +51,13 @@ export const SOURCES: Record<SourceId, SourceInfo> = {
     license: "CC0",
     licenseUrl: CC0,
     role: "Editions of sheet music published since 2000, and new works",
+  },
+  k10plus: {
+    name: "K10plus",
+    url: "https://wiki.k10plus.de/spaces/K10PLUS/overview",
+    license: "CC0",
+    licenseUrl: CC0,
+    role: "Sheet music published since 2000 in German libraries, from abroad too, and new works",
   },
   rism: {
     name: "RISM",
@@ -127,6 +134,7 @@ export const PROVIDERS: Record<ProviderId, { name: string; kind: LinkKind }> = {
   "swedish-libraries": { name: "Swedish libraries (LIBRIS)", kind: "library" },
   gnd: { name: "German National Library (GND)", kind: "data" },
   dnb: { name: "German National Library", kind: "edition" },
+  k10plus: { name: "German libraries (K10plus)", kind: "library" },
   rism: { name: "RISM", kind: "library" },
 };
 

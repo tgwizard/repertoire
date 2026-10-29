@@ -86,6 +86,8 @@ const USE: Record<SourceId, string> = {
     "The Swedish union catalogue: the sheet music of Swedish libraries, KB's legal deposit copies, universities and music colleges among them. Musik- och teaterbiblioteket in Stockholm lends scores and parts (orchestral sets too) across Sweden: works we have get a link to borrow them there, or to the record of the libraries that have a copy. Works we didn't have, often Swedish, come in when a library states their instrumentation: in its own field, in its classification (“Xkeeb”: a string quartet) or in the title (“variationer för blåskvintett”).",
   dnb:
     "The German National Library's catalogue of sheet music, which publishers in Germany must deposit: every edition since 2000, new ones within weeks. Works we have get a link to their published editions; new works come in when the record names the composer and states the instrumentation, and isn't an arrangement or an anthology.",
+  k10plus:
+    "The union catalogue of most German research libraries, and some Austrian ones. Beyond what's deposited with the German National Library, it has the editions those libraries bought, many from abroad (catalogued in WorldCat first): works we have get a link to the libraries' records; new works come in as for DNB, their instrumentation often stated instrument by instrument.",
   mutopia:
     "Volunteers' new engravings of public-domain music, free to download. Each piece is linked from the work it belongs to; many are single movements, so Mutopia adds links, not works.",
 };

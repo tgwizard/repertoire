@@ -23,6 +23,7 @@ const MIN_GAP_MS: Record<string, number> = {
   "libris.kb.se": 1000,
   "data.dnb.de": 1000,
   "services.dnb.de": 1000,
+  "sru.k10plus.de": 1000,
 };
 const MAX_ATTEMPTS = 6;
 

@@ -73,7 +73,10 @@ test("LIBRIS: borrow links for works we have, and works we didn't have from the 
   // A line-up only the title spells out; a title and instrumentation that disagree
   assert.deepEqual(lineups(work("Per spelman, variationer för blåskvintett").id), [{ lineup: "bassoon,clarinet,flute,horn,oboe", arrangement: 0 }]);
   assert.equal(all("SELECT * FROM works WHERE title LIKE 'Partita%'").length, 0);
-  assert.deepEqual(all("SELECT items, matched, added FROM sources WHERE id = 'libris'")[0], { items: 8, matched: 3, added: 3 });
+  // Composers without dates: by full name, when it's one we know
+  assert.deepEqual(all("SELECT ref FROM links WHERE entity_id = ? AND provider = 'libris'", work("Wind Quintet, Op.43").id), [{ ref: "lbn43" }]);
+  assert.equal(all("SELECT * FROM works WHERE title = 'Kvintett för blåsare'").length, 0);
+  assert.deepEqual(all("SELECT items, matched, added FROM sources WHERE id = 'libris'")[0], { items: 10, matched: 4, added: 3 });
 });
 
 test("LIBRIS: other libraries' copies are linked; a line-up from the classification", () => {
@@ -96,9 +99,25 @@ test("DNB: editions of works we have, newest first, and new works with their lin
     { lineup: "piano,viola", arrangement: 0 },
   ]);
   assert.deepEqual(all("SELECT name, born FROM composers WHERE id = ?", decibel.composer_id), [{ name: "Nicola Campogrande", born: 1969 }]);
-  assert.deepEqual(all("SELECT anchor FROM anchors WHERE entity_id = ? ORDER BY anchor", decibel.id), [{ anchor: "gnd:1397222646" }]);
+  // Its GND work, and every edition of it
+  assert.deepEqual(all("SELECT anchor FROM anchors WHERE entity_id = ? ORDER BY anchor", decibel.id), [{ anchor: "dnb:d150c" }, { anchor: "dnb:d150v" }, { anchor: "gnd:1397222646" }]);
   assert.equal(all("SELECT * FROM works WHERE title IN ('Kleine Stücke', 'Zwei Stücke')").length, 0);
   assert.deepEqual(all("SELECT items, matched, added FROM sources WHERE id = 'dnb'")[0], { items: 6, matched: 3, added: 1 });
+});
+
+test("K10plus: links to German libraries' editions, new works from the medium of performance", () => {
+  const brahms = work("Clarinet Quintet, Op.115");
+  assert.deepEqual(all("SELECT ref, label, url FROM links WHERE entity_id = ? AND provider = 'k10plus'", brahms.id), [
+    { ref: "k115", label: "Score and parts · Donemus · 2023", url: "https://opac.k10plus.de/DB=2.1/PPNSET?PPN=k115" },
+  ]);
+  // Composer by GND id, and by full name and birth year; numbers tell the two apart
+  const [one, two] = [work("Quintetto a fiato n. 1"), work("Quintetto a fiato n. 2")];
+  assert.equal(one.composer_id, two.composer_id);
+  assert.equal(one.composer_id, work("150 Decibel").composer_id);
+  assert.deepEqual(lineups(two.id), [{ lineup: "bassoon,clarinet,flute,horn,oboe", arrangement: 0 }]);
+  assert.deepEqual(all("SELECT anchor FROM anchors WHERE entity_id = ?", two.id), [{ anchor: "k10plus:kq2" }]);
+  assert.equal(all("SELECT * FROM works WHERE title = 'Quintet'").length, 0); // a composer we don't know, without a GND id
+  assert.deepEqual(all("SELECT items, matched, added FROM sources WHERE id = 'k10plus'")[0], { items: 4, matched: 1, added: 2 });
 });
 
 test("IMSLP arrangements: who arranged what for which of the work's line-ups; arrangers are searchable", () => {
@@ -185,10 +204,11 @@ test("line-up claims that contradict the title are refused", () => {
 
 test("line-ups count their works and say where they come from", () => {
   const quintet = all("SELECT * FROM lineups WHERE key = 'bassoon,clarinet,flute,horn,oboe'")[0]!;
-  assert.equal(quintet.original, 4); // Nielsen, Barber (IMSLP page and Wikipedia item, separate in this crawl), Sund from LIBRIS
+  assert.equal(quintet.original, 6); // Nielsen, Barber (IMSLP page and Wikipedia item, separate in this crawl), Sund from LIBRIS, Campogrande's two from K10plus
   assert.equal(quintet.players, 5);
   assert.deepEqual(JSON.parse(quintet.sources), {
     imslp: ["For flute, oboe, clarinet, bassoon, horn", "For flute, oboe, clarinet, bassoon, horn (arr)"],
+    k10plus: ["flute, oboe, clarinet, horn, bassoon"],
     libris: ["Per spelman, variationer för blåskvintett"],
     wikipedia: ["Compositions for wind quintet"],
   });

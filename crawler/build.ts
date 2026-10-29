@@ -40,6 +40,7 @@ import type { MusicBrainzStage } from "./sources/musicbrainz.ts";
 import { mutopiaUrl, type MutopiaStage } from "./sources/mutopia.ts";
 import { kssbLineup, librisHolding, librisLineup, librisRecordLineup, librisUrl, MTB, type LibrisRecord, type LibrisStage } from "./sources/libris.ts";
 import { composeRecord, dnbHolding, dnbLineup, dnbUrl, type DnbRecord, type DnbStage } from "./sources/dnb.ts";
+import { k10plusCollection, k10plusUrl, type K10plusStage } from "./sources/k10plus.ts";
 import { ANTHOLOGY, genreOf, lineupFromTitle, onlyGenre, withoutLineup } from "./title-lineup.ts";
 import { gndAliases, gndLineup, gndMatchTitle, gndPart, gndTitle, gndUrl, gndYear, type GndStage, type GndWork } from "./sources/gnd.ts";
 import { rismMatchTitle, rismPersonUrl, rismRank, rismUrl, type RismStage } from "./sources/rism.ts";
@@ -69,6 +70,7 @@ export interface BuildInput {
   libris: LibrisStage | null;
   gnd: GndStage | null;
   dnb: DnbStage | null;
+  k10plus: K10plusStage | null;
   rism: RismStage | null;
 }
 
@@ -87,12 +89,13 @@ export async function loadInput(): Promise<BuildInput> {
     libris: await readStage<LibrisStage>("libris"),
     gnd: await readStage<GndStage>("gnd"),
     dnb: await readStage<DnbStage>("dnb"),
+    k10plus: await readStage<K10plusStage>("k10plus"),
     rism: await readStage<RismStage>("rism"),
   };
 }
 
 /** Anchor schemes, strongest first (see ids.ts). */
-const WORK_SCHEMES = ["imslp", "wikidata", "gnd", "openopus", "libris", "dnb"];
+const WORK_SCHEMES = ["imslp", "wikidata", "gnd", "openopus", "libris", "dnb", "k10plus"];
 const COMPOSER_SCHEMES = ["wikidata", "imslp", "gnd", "openopus", "libris"];
 
 interface Membership {
@@ -114,6 +117,8 @@ interface BuildWork {
   libris?: string;
   /** The DNB record a work was created from, when it names no GND work */
   dnb?: string;
+  /** The K10plus record (PPN) a work was created from, when it names no GND work */
+  k10plus?: string;
   /** Its title less the line-up it spells out, for later sources to match ("Como una fantasía") */
   bareTitle?: string;
   /** German National Library work id */
@@ -303,7 +308,8 @@ function distinct(title: string, numbers: Set<string>, other: string): boolean {
     const mine = [...numbers].filter((k) => system(k) === s);
     if ([...theirs].some((k) => system(k) === s) && !mine.some((k) => theirs.has(k))) return true;
   }
-  const no = (t: string) => /\b(?:No|Nr)\.?\s*(\d+)\b/i.exec(t)?.[1] ?? null;
+  // "No. 2", "Nr 2", Italian and French "n. 2", "n° 2", or as an ordinal: "2. Streichquartett"
+  const no = (t: string) => (/\b(?:No|Nr|N(?=[.°º]))[.°º]?\s*(\d+)\b/i.exec(t) ?? /^(\d+)\.\s+\p{L}/u.exec(t))?.[1] ?? null;
   const [n1, n2] = [no(title), no(other)];
   if (n1 !== null && n2 !== null && n1 !== n2) return true;
   const [k1, k2] = [musicalKey(title), musicalKey(other)];
@@ -371,7 +377,7 @@ const nameAnchor = (name: string, born: number | null | undefined) => (born ? `n
 
 /** Merges the sources into a new database at `out`, keeping ids from `previous`. */
 export function build(input: BuildInput, out: string, previous: Previous, builtAt = new Date()): BuildResult {
-  const { imslp, imslpPages, eras, wikipedia: wiki, wikidata: wd, openopus: oo, musicbrainz: mb, mutopia, libris, gnd, dnb, rism } = input;
+  const { imslp, imslpPages, eras, wikipedia: wiki, wikidata: wd, openopus: oo, musicbrainz: mb, mutopia, libris, gnd, dnb, k10plus, rism } = input;
   const works = new Map<string, BuildWork>();
   const composers = new Map<string, BuildComposer>();
   const byComposer = new Map<string, BuildWork[]>();
@@ -382,9 +388,9 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
   /** Anchors of records left out as possibly being one of these works */
   const uncertain = new Map<string, BuildWork[]>();
   const stats = {
-    matched: { wikidata: 0, wikipedia: 0, openopus: 0, mutopia: 0, libris: 0, gnd: 0, dnb: 0, rism: 0 },
-    added: { wikipedia: 0, wikidata: 0, openopus: 0, libris: 0, gnd: 0, dnb: 0 },
-    leftOut: { gnd: 0, libris: 0, dnb: 0 },
+    matched: { wikidata: 0, wikipedia: 0, openopus: 0, mutopia: 0, libris: 0, gnd: 0, dnb: 0, k10plus: 0, rism: 0 },
+    added: { wikipedia: 0, wikidata: 0, openopus: 0, libris: 0, gnd: 0, dnb: 0, k10plus: 0 },
+    leftOut: { gnd: 0, libris: 0, dnb: 0, k10plus: 0 },
   };
 
   const composer = (key: string, init: () => Omit<BuildComposer, "key" | "sitelinks">): BuildComposer => {
@@ -696,12 +702,14 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
   // record of a work we don't have adds the work when its instrumentation (in its field,
   // spelled out in its title, or in its classification) is fully understood, agrees with
   // any group size the title names, and it isn't an arrangement or an anthology; further
-  // editions of it then match it. Composers match on surname and birth year.
-  // Musik- och teaterbiblioteket's records with a line-up of their own come first, as
-  // they always have; the rest (other libraries' records, line-ups from the
-  // classification) after GND and DNB (step 9c), so that the works those give us are
-  // matched rather than taken for new ones, and a work only comes in when it can't be one
-  // we have under another title.
+  // editions of it then match it. Composers match on surname and birth year; without a
+  // birth year, on their full name, when it's the name of only one composer we know.
+  // Musik- och teaterbiblioteket's records with a line-up of their own and the composer's
+  // birth year in the record come first, as they always have; the rest (other libraries'
+  // records, line-ups from the classification, composers without dates or with them only
+  // in their authority record) after GND and DNB (step 9c), so that the works those give
+  // us are matched rather than taken for new ones, and a work only comes in when it can't
+  // be one we have under another title.
   // Works made from LIBRIS records, by composer and the library's uniform title (else the
   // title less its line-up, and the line-up), so later editions find them whatever their
   // printed titles say.
@@ -718,16 +726,41 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
       return (sameGenre(title, x.title) || sharesWord(title, x.title) || (!!x.bareTitle && sharesWord(title, x.bareTitle))) && !distinct(title, numbers, x.title);
     });
   };
+  /** The one work of the composer for the line-up that's the set this title is a number of ("op. 56, Nr 2" of "Op.56") */
+  const setOf = (composerKey: string, title: string, lineup: string): BuildWork | null => {
+    const sets = [...catalogueKeys(title)].filter((k) => k.includes("/")).map((k) => k.slice(0, k.indexOf("/")));
+    if (!sets.length) return null;
+    const whole = (byComposer.get(composerKey) ?? []).filter((x) => {
+      const keys = catalogueKeys(x.title);
+      return x.ensembles.has(lineup) && sets.some((k) => keys.has(k)) && ![...keys].some((k) => k.includes("/"));
+    });
+    return whole.length === 1 ? whole[0]! : null;
+  };
   const fromLibris = new Map<string, BuildWork>();
+  // Composers by full name, once every source's are in (for the late pass)
+  let byFullName: Map<string, BuildComposer[]> | null = null;
   const takeLibris = (r: LibrisRecord, late: boolean) => {
     if (r.collection || r.composers.length !== 1) return;
     const lc = r.composers[0]!;
-    if (!lc.born) return;
-    const sameSurname = bySurname.get(surnameKey(lc.family)) ?? [];
-    let found = sameSurname.filter((c) => near(c.born, lc.born) && (!lc.died || !c.died || near(c.died, lc.died)));
-    // Death years disagree now and then (Besozzi: 1775 or 1793): the same full name and
-    // birth year is still the same person
-    if (!found.length) found = sameSurname.filter((c) => near(c.born, lc.born) && normalize(c.name) === normalize(`${lc.given ?? ""} ${lc.family}`));
+    const fullName = normalize(`${lc.given ?? ""} ${lc.family}`);
+    let found: BuildComposer[];
+    if (lc.born) {
+      const sameSurname = bySurname.get(surnameKey(lc.family)) ?? [];
+      found = sameSurname.filter((c) => near(c.born, lc.born) && (!lc.died || !c.died || near(c.died, lc.died)));
+      // Death years disagree now and then (Besozzi: 1775 or 1793): the same full name and
+      // birth year is still the same person
+      if (!found.length) found = sameSurname.filter((c) => near(c.born, lc.born) && normalize(c.name) === fullName);
+    } else {
+      // No dates, in the record or its authority (a quarter of the records): the one
+      // composer we know by that full name, given and family, if there's one
+      if (!late || !lc.given) return;
+      if (!byFullName) {
+        byFullName = new Map();
+        for (const x of composers.values()) byFullName.set(normalize(x.name), [...(byFullName.get(normalize(x.name)) ?? []), x]);
+      }
+      found = byFullName.get(fullName) ?? [];
+      if (found.length !== 1) return;
+    }
     let c: BuildComposer | null = found.length === 1 ? found[0]! : null;
     const lineup = r.arranged || ANTHOLOGY.test(r.title) ? null : librisRecordLineup(r);
     // The title less its line-up ("Danzas argentinas, pour piano"), when that still names a
@@ -742,14 +775,7 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     if (c && !w && bare) w = matchWork(bare, (byComposer.get(c.key) ?? []).filter((x) => x.ensembles.has(lineup!)));
     // Late, one number of a set we have ("Kvintett, op. 56, Nr 2" of "3 Wind Quintets,
     // Op.56"): an edition of part of it
-    if (late && c && !w && lineup) {
-      const sets = [...catalogueKeys(`${r.uniform ?? ""} ${r.title}`)].filter((k) => k.includes("/")).map((k) => k.slice(0, k.indexOf("/")));
-      const whole = (byComposer.get(c.key) ?? []).filter((x) => {
-        const keys = catalogueKeys(x.title);
-        return x.ensembles.has(lineup) && sets.some((k) => keys.has(k)) && ![...keys].some((k) => k.includes("/"));
-      });
-      if (whole.length === 1) w = whole[0]!;
-    }
+    if (late && c && !w && lineup) w = setOf(c.key, `${r.uniform ?? ""} ${r.title}`, lineup);
     if (w) {
       stats.matched.libris++;
     } else {
@@ -786,7 +812,8 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
   const lateLibris: LibrisRecord[] = [];
   for (const r of libris?.records ?? []) {
     const own = r.arranged || ANTHOLOGY.test(r.title) ? null : librisRecordLineup({ ...r, kssb: [] });
-    const early = (r.held ?? [MTB]).includes(MTB) && (own || !librisRecordLineup(r));
+    // (Dates from the composer's authority record are new: their records come late too)
+    const early = (r.held ?? [MTB]).includes(MTB) && (own || !librisRecordLineup(r)) && !!r.composers[0]?.born && !r.composers[0].datesFromAuthority;
     if (early) takeLibris(r, false);
     else lateLibris.push(r);
   }
@@ -924,14 +951,16 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     for (const c of list) if (c.players && titleFitsPlayers(w.title, c.players)) addMembership(w, c.players, false, "gnd", c.medium);
   }
 
-  // ---- 9b. DNB ------------------------------------------------------------------
-  // Editions of sheet music deposited with the German National Library since 2000. An
-  // edition of a work we have (by the GND work it names, else its composer and title) adds
-  // a link to it, newest first. One of a work we don't have adds the work when the record
-  // names its composer by GND id, its instrumentation is understood (the work's, or the
-  // title's: "für Violine und Klavier"), and it isn't an arrangement or an anthology; and,
-  // when it names a GND work GND itself gave us nothing for, that GND left out was its call.
-  // Further editions of the work (another line-up of it: "for viola and piano", "for
+  // ---- 9b. DNB and K10plus -------------------------------------------------------
+  // Editions of sheet music deposited with the German National Library since 2000, and
+  // (in step 9c) those in K10plus's libraries that DNB doesn't have. An edition of a work we have (by
+  // the GND work it names, else its composer and title) adds a link to it, newest first.
+  // One of a work we don't have adds the work when the record names its composer by GND
+  // id (or one we know by full name and birth year), its instrumentation is understood
+  // (the work's, the edition's medium of performance, or the title's: "für Violine und
+  // Klavier"), and it isn't an arrangement or an anthology; and, when it names a GND work
+  // GND itself gave us nothing for, that GND left out was its call. Further editions of the
+  // work from the same source (another line-up of it: "for viola and piano", "for
   // violoncello and piano") add to it.
   const byGndAny = new Map<string, BuildWork>();
   for (const w of works.values()) {
@@ -940,10 +969,12 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
   }
   const gndRecords = new Set((gnd?.works ?? []).map((g) => g.id));
   const fromDnb = new Map<string, BuildWork>();
-  const fromDnbWorks = new Set<BuildWork>();
-  const editions = new Map<BuildWork, DnbRecord[]>();
-  for (const raw of dnb?.records ?? []) {
-    if (raw.arranged || raw.collection || raw.composers > 1 || ANTHOLOGY.test(raw.title)) continue;
+  /** Works DNB or K10plus made, by which */
+  const madeBy = new Map<BuildWork, "dnb" | "k10plus">();
+  const editions = new Map<BuildWork, { from: "dnb" | "k10plus"; r: DnbRecord }[]>();
+  const takeEdition = (raw: DnbRecord, from: "dnb" | "k10plus") => {
+    const collection = from === "k10plus" ? k10plusCollection(raw) : raw.collection;
+    if (raw.arranged || collection || raw.composers > 1 || ANTHOLOGY.test(raw.title)) return;
     const r = composeRecord(raw);
     const players = dnbLineup(r);
     const lineup = players && ensembleKey(players);
@@ -965,19 +996,19 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
     let w = (r.work?.gnd ? byGndAny.get(r.work.gnd) : undefined) ?? keys.map((k) => fromDnb.get(k)).find(Boolean) ?? null;
     if (!w && ck)
       for (const t of [r.work?.title, numbered, title]) if (t && (w = matchWork(t, byComposer.get(ck) ?? [], (x, byNumber) => byNumber || titleOnlyFits(x, t, lineup, null)))) break;
+    // One number of a set we have, as for LIBRIS
+    if (!w && ck && lineup) w = setOf(ck, `${r.work?.title ?? ""} ${numbered}`, lineup);
     if (w) {
-      stats.matched.dnb++;
-      // Another line-up of a work DNB gave us
-      if (fromDnbWorks.has(w) && players && lineup && !w.ensembles.has(lineup) && titleFitsPlayers(title, players)) addMembership(w, players, false, "dnb", r.remainder ?? title);
+      stats.matched[from]++;
+      // Another line-up of a work this source gave us (another source's edition in another
+      // line-up is too often an arrangement no one says is one)
+      if (madeBy.get(w) === from && players && lineup && !w.ensembles.has(lineup) && titleFitsPlayers(title, players)) addMembership(w, players, false, from, r.remainder ?? title);
     } else {
-      if (!players || !lineup || !r.composer?.gnd) continue;
-      if (r.work?.gnd && gndRecords.has(r.work.gnd)) continue; // GND's own record of it didn't come in
-      if (!titleFitsPlayers(title, players) || COLLECTION.test(title)) continue;
-      if (ck && couldBe(ck, numbered, lineup).length) {
-        stats.leftOut.dnb++;
-        continue;
-      }
-      if (!ck) {
+      if (!players || !lineup || !(ck || r.composer?.gnd)) return;
+      if (r.work?.gnd && gndRecords.has(r.work.gnd)) return; // GND's own record of it didn't come in
+      if (!titleFitsPlayers(title, players) || COLLECTION.test(title)) return;
+      if (ck && couldBe(ck, numbered, lineup).length) return void stats.leftOut[from]++;
+      if (!ck && r.composer?.gnd) {
         const g = r.composer;
         ck = `gnd:${g.gnd}`;
         const c = composer(ck, () => ({ name: g.name, born: g.born ?? undefined, died: g.died ?? undefined }));
@@ -986,26 +1017,43 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
         const surname = surnameKey(g.name.split(" ").at(-1)!);
         bySurname.set(surname, [...(bySurname.get(surname) ?? []), c]);
       }
-      w = newWork(r.work?.gnd ? `gnd:${r.work.gnd}` : `dnb:${r.id}`, title, ck);
-      if (r.work?.gnd) w.gnd = { id: r.work.gnd, source: "dnb" };
-      else w.dnb = r.id;
+      w = newWork(r.work?.gnd ? `gnd:${r.work.gnd}` : `${from}:${r.id}`, title, ck!);
+      if (r.work?.gnd) w.gnd = { id: r.work.gnd, source: from };
+      else w[from] = r.id;
       if (r.work?.title && normalize(r.work.title) !== normalize(title)) w.aliases.add(tidy(r.work.title));
       addWork(w);
-      addMembership(w, players, false, "dnb", r.work?.media.length ? r.work.media.map((m) => (m.count > 1 ? `${m.name} (${m.count})` : m.name)).join(", ") : (r.remainder ?? title));
-      fromDnbWorks.add(w);
-      stats.added.dnb++;
+      const media = r.work?.media.length ? r.work.media : (r.medium ?? []);
+      addMembership(w, players, false, from, media.length ? media.map((m) => (m.count > 1 ? `${m.name} (${m.count})` : m.name)).join(", ") : (r.remainder ?? title));
+      madeBy.set(w, from);
+      stats.added[from]++;
     }
     for (const k of keys) if (!fromDnb.has(k)) fromDnb.set(k, w);
-    editions.set(w, [...(editions.get(w) ?? []), r]);
-  }
-  // The newest editions of each work
-  for (const [w, list] of editions) {
-    for (const r of list.sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || b.id.localeCompare(a.id)).slice(0, 6))
-      w.extraLinks.push({ provider: "dnb", ref: r.id, url: dnbUrl(r.id), label: dnbHolding(r), source: "dnb" });
-  }
+    editions.set(w, [...(editions.get(w) ?? []), { from, r }]);
+  };
+  // Records read as they were first (line-ups from GND's terms and "für …") before those
+  // only the later readings understand, so the works those gave stay theirs
+  const dnbRecords = (dnb?.records ?? []).map(composeRecord);
+  const readLater = new Set(dnbRecords.filter((r) => !dnbLineup(r, { basic: true }) && dnbLineup(r)));
+  for (const r of dnbRecords) if (!readLater.has(r)) takeEdition(r, "dnb");
 
-  // ---- 9c. LIBRIS, the rest (see step 8) -------------------------------------------
-  for (const r of lateLibris) takeLibris(r, true);
+  // ---- 9c. LIBRIS, the rest (see step 8), and K10plus ---------------------------------
+  // What the build read before first, so the works it gave stay theirs: the rest of
+  // LIBRIS. Then what it reads now: DNB's records only the later readings understand,
+  // K10plus's, and LIBRIS records whose composers are newly known (by full name, or by
+  // dates from their authority record).
+  const newlyKnown = (r: LibrisRecord) => !r.composers[0]?.born || !!r.composers[0].datesFromAuthority;
+  for (const r of lateLibris.filter((r) => !newlyKnown(r))) takeLibris(r, true);
+  for (const r of readLater) takeEdition(r, "dnb");
+  for (const r of k10plus?.records ?? []) takeEdition(r, "k10plus");
+  for (const r of lateLibris.filter(newlyKnown)) takeLibris(r, true);
+  // The newest editions of each work, from each
+  for (const [w, list] of editions)
+    for (const from of ["dnb", "k10plus"] as const)
+      for (const { r } of list
+        .filter((e) => e.from === from)
+        .sort((a, b) => (b.r.year ?? 0) - (a.r.year ?? 0) || b.r.id.localeCompare(a.r.id))
+        .slice(0, 6))
+        w.extraLinks.push({ provider: from, ref: r.id, url: from === "dnb" ? dnbUrl(r.id) : k10plusUrl(r.id), label: dnbHolding(r), source: from });
 
   // ---- 10. RISM ------------------------------------------------------------------
   // Manuscripts and early prints of works we have, and the libraries holding them. No
@@ -1100,7 +1148,11 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
       // A record that made a work of its own before may now be an edition of another
       ...w.extraLinks.filter((l) => l.provider === "libris" || l.provider === "swedish-libraries").map((l) => `libris:${l.ref}`),
       w.dnb && `dnb:${w.dnb}`,
-    ].filter((a): a is string => !!a);
+      w.k10plus && `k10plus:${w.k10plus}`,
+      // Every edition of it, linked or not: one that made a work of its own before may now
+      // be known as an edition of this one
+      ...(editions.get(w) ?? []).map((e) => `${e.from}:${e.r.id}`),
+    ].filter((a, i, all): a is string => !!a && all.indexOf(a) === i);
   const workAnchorLists = workList.map(workAnchors);
   const partAnchorLists = workList.map((w) => absorbed.get(w) ?? []);
   // Of the parts of a split, the one with the title and year the id showed keeps it
@@ -1388,6 +1440,13 @@ export function build(input: BuildInput, out: string, previous: Previous, builtA
         matched: stats.matched.dnb,
         added: stats.added.dnb,
         note: `printed music published since ${dnb?.firstYear ?? "2000"}, deposited with the German National Library; ${stats.leftOut.dnb} left out as possibly works we have under other titles`,
+      },
+      k10plus: {
+        fetchedAt: iso(k10plus?.fetchedAt),
+        items: k10plus?.records.length ?? 0,
+        matched: stats.matched.k10plus,
+        added: stats.added.k10plus,
+        note: `printed music published since ${k10plus?.firstYear ?? "2000"} in German libraries, not DNB's; ${stats.leftOut.k10plus} left out as possibly works we have under other titles`,
       },
       rism: {
         fetchedAt: iso(rism?.fetchedAt),

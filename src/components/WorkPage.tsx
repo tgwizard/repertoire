@@ -18,6 +18,8 @@ function LinkItem({ l }: { l: WorkLink }) {
         ? `Borrow from Musik- och teaterbiblioteket, Stockholm${l.label ? `: ${l.label}` : ""}`
         : l.provider === "swedish-libraries"
           ? `In Swedish libraries${l.label ? `: ${l.label}` : ""}`
+          : l.provider === "k10plus"
+            ? `In German libraries${l.label ? `: ${l.label}` : ""}`
           : l.provider === "dnb"
             ? l.label ?? "Published edition"
         : l.provider === "rism"
@@ -79,7 +81,9 @@ export function WorkPage({ id }: { id: string }) {
   }
 
   const scores = w.links.filter((l) => l.kind === "score");
-  const libraries = w.links.filter((l) => l.kind === "library");
+  // Stockholm's first, then other Swedish libraries', RISM's sources, German libraries'
+  const libraryOrder = ["libris", "swedish-libraries", "rism", "k10plus"];
+  const libraries = w.links.filter((l) => l.kind === "library").sort((a, b) => libraryOrder.indexOf(a.provider) - libraryOrder.indexOf(b.provider));
   const editions = w.links.filter((l) => l.kind === "edition");
   const elsewhere = w.links.filter((l) => l.kind === "reference" || l.kind === "data");
   const others = (more.data?.works ?? []).filter((o) => o.id !== w.id).slice(0, 5);
@@ -96,11 +100,12 @@ export function WorkPage({ id }: { id: string }) {
   );
   // The era is the composer's; only a work that differs says so itself
   const workEra = w.era && w.era !== w.composer?.era ? w.era : null;
-  // Stockholm's copies, and other Swedish libraries', under a heading each rather than
+  // Stockholm's copies, other Swedish libraries' and German libraries', under a heading each rather than
   // repeated on every line
   const grouped = [
     { heading: "Borrow from Musik- och teaterbiblioteket, Stockholm", links: libraries.filter((l) => l.provider === "libris" && l.url) },
     { heading: "In other Swedish libraries (LIBRIS lists which)", links: libraries.filter((l) => l.provider === "swedish-libraries" && l.url) },
+    { heading: "In German libraries (K10plus lists which)", links: libraries.filter((l) => l.provider === "k10plus" && l.url) },
   ].filter((g) => g.links.length > 1);
   const inGroup = new Set(grouped.flatMap((g) => g.links));
   const rismPerson = composer.data?.links.find((l) => l.provider === "rism")?.url;

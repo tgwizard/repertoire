@@ -111,7 +111,7 @@ CREATE TABLE arrangements (
 CREATE TABLE links (
   entity TEXT NOT NULL,               -- 'work' or 'composer'
   entity_id TEXT NOT NULL,
-  provider TEXT NOT NULL,             -- a source (imslp, wikipedia, wikidata, musicbrainz, openopus, mutopia, libris, gnd, dnb, rism), or swedish-libraries (LIBRIS records not at Musik- och teaterbiblioteket)
+  provider TEXT NOT NULL,             -- a source (imslp, wikipedia, wikidata, musicbrainz, openopus, mutopia, libris, gnd, dnb, k10plus, rism), or swedish-libraries (LIBRIS records not at Musik- och teaterbiblioteket)
   kind TEXT NOT NULL,                 -- score, library, edition (published, to buy), reference, data
   ref TEXT NOT NULL,                  -- the provider's id (IMSLP page id, QID, …)
   url TEXT,

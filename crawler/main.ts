@@ -15,6 +15,7 @@ import { crawlComposerEras, crawlImslp, type ImslpStage } from "./sources/imslp.
 import { crawlImslpPages } from "./sources/imslp-pages.ts";
 import { crawlMusicBrainz } from "./sources/musicbrainz.ts";
 import { crawlDnb } from "./sources/dnb.ts";
+import { crawlK10plus } from "./sources/k10plus.ts";
 import { crawlGnd } from "./sources/gnd.ts";
 import { crawlLibris } from "./sources/libris.ts";
 import { crawlRism } from "./sources/rism.ts";
@@ -23,7 +24,7 @@ import { crawlOpenOpus } from "./sources/openopus.ts";
 import { crawlWikidata, type WikidataStage } from "./sources/wikidata.ts";
 import { crawlWikipedia } from "./sources/wikipedia.ts";
 
-const STAGES = ["imslp", "imslp-pages", "wikipedia", "wikidata", "openopus", "composers", "musicbrainz", "mutopia", "libris", "gnd", "dnb", "rism", "build"] as const;
+const STAGES = ["imslp", "imslp-pages", "wikipedia", "wikidata", "openopus", "composers", "musicbrainz", "mutopia", "libris", "gnd", "dnb", "k10plus", "rism", "build"] as const;
 type Stage = (typeof STAGES)[number];
 
 const { values, positionals } = parseArgs({
@@ -66,6 +67,7 @@ const gcNamespaces: Partial<Record<Stage, string>> = {
   libris: "libris",
   gnd: "gnd",
   dnb: "dnb",
+  k10plus: "k10plus",
 };
 const completed: string[] = [];
 
@@ -89,6 +91,7 @@ for (const stage of STAGES) {
     if (stage === "libris") await crawlLibris();
     if (stage === "gnd") await crawlGnd();
     if (stage === "dnb") await crawlDnb();
+    if (stage === "k10plus") await crawlK10plus();
     if (stage === "rism") await crawlRism();
     if (stage === "build") {
       const { meta } = await buildDataset();

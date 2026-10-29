@@ -68,6 +68,7 @@ export const SOURCE_MAX_AGE_DAYS: Record<SourceId, number> = {
   libris: 60, // result pages cached 20–40 days; the oldest counts
   gnd: 90, // a dump, downloaded every 60 days
   dnb: 150, // searches by year: this year and last cached 7–14 days, older years 60–120
+  k10plus: 150, // as DNB
   rism: 75, // exports, downloaded every 45 days
 };
 

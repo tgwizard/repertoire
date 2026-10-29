@@ -85,7 +85,7 @@ test("known misclassifications stay fixed", async () => {
   assert.equal(await rank(STRING_QUARTET, /Beethoven/, /Für Elise/), 0);
   // Open Opus "String Quartet no. 3, for soprano and string quartet" isn't for string quartet alone.
   const quartets = await lineup(STRING_QUARTET, 5000);
-  assert.deepEqual(quartets.filter((w) => /\bfor\b.*(soprano|voice|double bass)/i.test(w.title)).map((w) => w.title), []);
+  assert.deepEqual(quartets.filter((w) => /\bfor\b.*(soprano|voice|double bass)/i.test(w.title) && !/ad lib/i.test(w.title)).map((w) => w.title), []);
 });
 
 test("lists are ranked, consistent with their facets, and page without gaps", async () => {
@@ -247,6 +247,18 @@ test("DNB: published editions of works we have, and new works", async () => {
   // An edition of a work IMSLP has under another title, by its opus number: not a new work
   const tchaikovsky = await search("capriccio italien tchaikovsky");
   assert.ok(!tchaikovsky.works.some((x) => /^Capriccio italien/i.test(x.title)), "Capriccio italien duplicated");
+});
+
+test("K10plus: German libraries' editions of works we have, and new works, recent wind quintets among them", async () => {
+  const meta = await api<Meta>("/api/meta");
+  assert.ok((meta.sources.k10plus?.matched ?? 0) > 25_000, `only ${meta.sources.k10plus?.matched} K10plus editions matched`);
+  assert.ok((meta.sources.k10plus?.added ?? 0) > 3_000, `only ${meta.sources.k10plus?.added} works added from K10plus`);
+  // Dai Fujikura's Cosmic breath (2022), "for wind quintet": a line-up from the title
+  const fujikura = await api<WorksPage>(`/api/works?lineup=${key(WIND_QUINTET)}&q=${encodeURIComponent("cosmic breath")}`);
+  assert.ok(fujikura.works.some((w) => w.composer?.name === "Dai Fujikura"), "Cosmic breath not listed for wind quintet");
+  // Luciano Berio's Ricorrenze, per quintetto a fiati
+  const berio = await api<WorksPage>(`/api/works?lineup=${key(WIND_QUINTET)}&q=ricorrenze`);
+  assert.ok(berio.works.some((w) => w.composer?.name === "Luciano Berio"), "Ricorrenze not listed for wind quintet");
 });
 
 test("works people found missing: a Swedish wind quintet; one arranger's arrangements", async () => {
