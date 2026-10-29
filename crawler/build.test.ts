@@ -2,7 +2,7 @@
 // across rebuilds, and the exports and SQL dump made from the result.
 
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { copyFileSync, mkdtempSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -249,6 +249,25 @@ test("the SQL dump recreates the dataset exactly (it is what D1 loads)", () => {
   for (const t of ["works_fts", "composers_fts"]) assert.deepEqual(rows(copy, `SELECT rowid, * FROM ${t} ORDER BY rowid`), all(`SELECT rowid, * FROM ${t} ORDER BY rowid`), t);
   const hit = rows(copy, "SELECT w.title FROM works_fts f JOIN works w ON w.n = f.rowid WHERE works_fts MATCH 'lutoslawski'");
   assert.deepEqual(hit, [{ title: "Trio for Flute, Oboe and Piano" }]);
+});
+
+test("the SQL dump loads a row too long for one statement in pieces", () => {
+  const dir = mkdtempSync(join(tmpdir(), "repertoire-dump-"));
+  const big = join(dir, "big.sqlite");
+  copyFileSync(path, big);
+  // Longer than D1's 100 KB a statement, with quotes and characters outside the BMP
+  const sources = JSON.stringify({ dnb: Array.from({ length: 9000 }, (_, i) => `für Männerchor's 𝄞 ${i}`) });
+  const edit = new DatabaseSync(big);
+  edit.prepare("UPDATE lineups SET sources = ? WHERE key = 'piano'").run(sources);
+  edit.close();
+  const copy = new DatabaseSync(":memory:");
+  for (const sql of sqlDump(big)) {
+    assert.ok(Buffer.byteLength(sql) < 100_000, `a statement of ${Buffer.byteLength(sql)} bytes`);
+    copy.exec(sql);
+    if (sql.startsWith("UPDATE")) copy.exec(sql); // a retried batch that had gone through
+  }
+  assert.equal(rows(copy, "SELECT sources FROM lineups WHERE key = 'piano'")[0]!.sources, sources);
+  assert.equal(rows(copy, "SELECT COUNT(*) AS n FROM lineups")[0]!.n, all("SELECT COUNT(*) AS n FROM lineups")[0]!.n);
 });
 
 test("downloads: a CSV per table with a README, and the database itself", async () => {
